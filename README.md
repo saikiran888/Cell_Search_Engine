@@ -8,7 +8,7 @@ Supports **Quick Search**, **Neighborhood Analysis**, **Multi-Query Search**, **
 
 ## 🛠️ Tools and Technologies
 
-- **Java 11+**
+- **Java 17** (tested with Java 17.0.2)
 - **Groovy**
 - **QuPath** (tested with version `0.4.0`)
 - **IntelliJ IDEA** (for development)
@@ -97,6 +97,23 @@ Depending on what you select:
   - Contrastive
   - Competitive Boost
 
+
+---
+
+## ⚠️ Potential Errors and Troubleshooting
+
+| Error | Reason | Solution |
+|:---|:---|:---|
+| **Cannot find Java 17** | Wrong Java SDK is configured. | Make sure **Project SDK** is set to **Java 17** (Settings → Project Structure → SDKs). |
+| **`./gradlew: Permission denied`** (on Mac/Linux) | Gradlew script is not executable. | Run `chmod +x gradlew` before building. |
+| **Extension not appearing in QuPath** | `.jar` file not properly built or installed. | Ensure you drag-and-drop the `.jar` into QuPath's `extensions/` folder and restart QuPath. |
+| **Version mismatch error** | Built for wrong QuPath version. | Confirm you are using **QuPath v0.4.0** or compatible. Rebuild if necessary. |
+| **Gradle Build Failed** | Wrong Gradle JVM or project misconfiguration. | In IntelliJ, ensure **Gradle JVM** is set to **Project SDK 17** (Settings → Build Tools → Gradle). |
+| **No image open in QuPath** | Trying to run the extension without an image loaded. | Open a slide/image before using the extension. |
+| **"Please select at least one cell" warning** | No cell selected for running search operations. | Select one or more cells in the image before running. |
+| **Phenotype or CSV search not working** | Missing or wrongly formatted CSV file. | Ensure your CSV has correct headers and coordinate fields (`x`, `y`, etc.). |
+| **Reset region fails** | No annotation selected. | Draw and select an annotation before trying to reset region highlights. |
+
 ---
 
 ## 📂 Folder Structure
@@ -114,8 +131,6 @@ Cell_Search_Engine/
         └── cell-search-engine-extension-1.0.0.jar
 ```
 
----
-
 ## 🙋‍♂️ Author
 
 **Saikiran Mandula**  
@@ -124,12 +139,3 @@ Cell_Search_Engine/
 ---
 
 
-
-
----
-  
-✅ **Now you can paste this entire thing directly into your GitHub repo `README.md` file.**  
-
-Would you also like me to prepare a short 1-line project description you can use on the GitHub homepage ("About" section)?  
-It will make the repo homepage even more polished! 🎯  
-Want me to give you that too? 🚀
