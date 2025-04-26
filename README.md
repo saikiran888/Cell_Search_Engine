@@ -130,6 +130,15 @@ Cell_Search_Engine/
     └── libs/
         └── cell-search-engine-extension-1.0.0.jar
 ```
+## 📸 Example Screenshots
+
+| Unified Search | Phenotype Finder | Cluster Search | Search Result |
+|:--------------:|:----------------:|:--------------:|:-------------:|
+| ![Unified Search](![image](https://github.com/user-attachments/assets/20fe4312-174c-48cc-b066-0ae602c12b25)) | ![Phenotype Finder](![image](https://github.com/user-attachments/assets/9ab760b1-da3e-466d-9702-1bafa4107af6)) | ![CSV Cluster Search](![image](https://github.com/user-attachments/assets/a9a04d47-8930-48a5-a875-d47094c9663b)) | ![Search Result](![image](https://github.com/user-attachments/assets/53f39ea4-8da6-4799-b9cb-e102b67b7ddc)) |
+
+## ©️ Copyright and License
+
+Copyright (c) 2025 Saikiran Mandula.
 
 ## 🙋‍♂️ Author
 
