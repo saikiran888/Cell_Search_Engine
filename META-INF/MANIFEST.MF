@@ -1,0 +1,31 @@
+Manifest-Version: 1.0
+Main-Class: qupath.ext.template.MySQLDebugger
+Implementation-Title: qupath-extension-template
+Implementation-Version: 0.1.0-SNAPSHOT
+Automatic-Module-Name: io.github.qupath.extension.template
+QuPath-Version: 0.5.1
+Class-Path: qupath-gui-fx-0.5.1.jar qupath-core-processing-0.5.1.jar qup
+ ath-core-0.5.1.jar logviewer-logging-logback-0.1.1.jar logback-classic-
+ 1.3.11.jar qupath-fxtras-0.1.4.jar qupath-bioimageio-spec-0.1.0.jar log
+ viewer-ui-main-0.1.1.jar logviewer-ui-textarea-0.1.1.jar logviewer-ui-r
+ ichtextfx-0.1.1.jar logviewer-api-0.1.1.jar slf4j-api-2.0.9.jar commons
+ -math3-3.6.1.jar groovy-xml-4.0.15.jar groovy-jsr223-4.0.15.jar groovy-
+ 4.0.15.jar richtextfx-0.11.0.jar javafx-fxml-20.jar javafx-fxml-20-win.
+ jar javafx-web-20.jar javafx-controls-20.jar javafx-controls-20-win.jar
+  javafx-media-20.jar javafx-swing-20.jar javafx-graphics-20.jar javafx-
+ graphics-20-win.jar javafx-base-20.jar javafx-base-20-win.jar snakeyaml
+ -2.2.jar picocli-4.7.5.jar jfxtras-menu-17-r1.jar commons-text-1.10.0.j
+ ar ikonli-javafx-12.3.1.jar ikonli-ionicons4-pack-12.3.1.jar commonmark
+ -ext-yaml-front-matter-0.21.0.jar commonmark-0.21.0.jar controlsfx-11.1
+ .2.jar guava-32.1.3-jre.jar ij-1.54f.jar gson-2.10.1.jar jts-core-1.19.
+ 0.jar opencv-platform-4.6.0-1.5.8.jar opencv-4.6.0-1.5.8.jar opencv-4.6
+ .0-1.5.8-windows-x86_64.jar openblas-platform-0.3.21-1.5.8.jar javacpp-
+ platform-1.5.8.jar openblas-0.3.21-1.5.8.jar openblas-0.3.21-1.5.8-wind
+ ows-x86_64.jar javacpp-1.5.8.jar javacpp-1.5.8-windows-x86_64.jar logba
+ ck-core-1.3.11.jar mysql-connector-j-8.0.33.jar jfxtras-common-17-r1.ja
+ r commons-lang3-3.12.0.jar ikonli-core-12.3.1.jar failureaccess-1.0.1.j
+ ar listenablefuture-9999.0-empty-to-avoid-conflict-with-guava.jar jsr30
+ 5-3.0.2.jar checker-qual-3.37.0.jar error_prone_annotations-2.21.1.jar 
+ protobuf-java-3.21.9.jar undofx-2.1.1.jar flowless-0.7.0.jar reactfx-2.
+ 0-M5.jar wellbehavedfx-0.3.3.jar
+
