@@ -156,7 +156,7 @@ Copyright (c) 2025 Saikiran Mandula.
 ## 🙋‍♂️ Author
 
 **Saikiran Mandula**  
-[GitHub](https://github.com/saikiran888) | [Portfolio](https://saikiranmandula.vercel.app/) | | [LinkedIn](https://www.linkedin.com/in/saikiranmandula/)
+[GitHub](https://github.com/saikiran888) | [Portfolio](https://saikiranmandula.vercel.app/) | [LinkedIn](https://www.linkedin.com/in/saikiranmandula/)
 
 ---
 
