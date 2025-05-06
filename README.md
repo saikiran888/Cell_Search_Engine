@@ -93,6 +93,8 @@ After installation, under `Extensions > Cell Search Engine`, you will see:
 | **Local Density Feature** | Compute and use local cell density as an additional feature for neighborhood search. |
 | **Export Matched Cells** | Save coordinates of matched cells into a CSV file directly. |
 | **Reset Highlights** | Quickly reset highlights for cells within an annotated region. |
+| **Channel Viewer** | Display a grid of channel-specific image patches (175×175 px) for selected cells, enabling visual inspection of channel intensities. |
+
 
 ---
 
@@ -154,7 +156,7 @@ Copyright (c) 2025 Saikiran Mandula.
 ## 🙋‍♂️ Author
 
 **Saikiran Mandula**  
-[GitHub](https://github.com/saikiran888) | [Portfolio](https://saikiranmandula.vercel.app/)
+[GitHub](https://github.com/saikiran888) | [Portfolio](https://saikiranmandula.vercel.app/) | | [LinkedIn](https://www.linkedin.com/in/saikiranmandula/)
 
 ---
 
