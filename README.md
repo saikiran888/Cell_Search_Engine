@@ -58,6 +58,8 @@ After installation, under `Extensions > Cell Search Engine`, you will see:
   - **Unified Search**:
     - Select a single cell ➔ Perform **Neighborhood Search**.
     - Select multiple cells ➔ Perform **Multi-Query Search** (Union, Intersection, Subtract, Contrastive, Competitive Boost).
+    - After running Unified Search, select ≥2 cells ➔ Compute pairwise Pearson correlations of cell features.
+    -  Displays a correlation matrix heatmap with legend.
 
 - **Comprehensive Search**
   - **Community Search (CSV Cluster Search)**:
@@ -66,8 +68,17 @@ After installation, under `Extensions > Cell Search Engine`, you will see:
   - **Phenotype Finder**:
     - Upload a CSV containing phenotype labels.
     - Highlight specific phenotypes like immune cells, tumor cells, etc.
-  - **Reset Region Highlights**:
+    - Phenotype vs Marker Mean Expression Heatmap
+    -  Generates a heatmap normalized to –2…+2 with a continuous gradient legend.
+    -   Includes cell count bars per phenotype.
+- **Reset Region Highlights**:
     - Reset and clear highlights in selected regions.
+
+- **Channel Viewer**
+    - Select one or more cells ➔ Display a grid of 175×175 px patches for each channel and cell.
+    - Scrollable, resizable window to inspect channel intensities visually.
+
+
 
 ---
 
