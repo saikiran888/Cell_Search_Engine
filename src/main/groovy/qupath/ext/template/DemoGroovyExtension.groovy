@@ -99,7 +99,15 @@ class DemoGroovyExtension implements QuPathExtension {
 		channelViewerItem.setOnAction { e ->
 			runChannelViewer(qupath)
 		}
-		mainMenu.getItems().addAll(quickSearchMenu, comprehensiveMenu, resetRegionItem,channelViewerItem)
+
+		def exprMatrixItem = new MenuItem("Expression Matrix")
+		exprMatrixItem.setOnAction { e ->
+			runExpressionMatrix(qupath)
+		}
+
+
+
+		mainMenu.getItems().addAll(quickSearchMenu, comprehensiveMenu, resetRegionItem,channelViewerItem, exprMatrixItem)
 	}
 
 // Unified Search that intelligently switches between Neighborhood and Multi-Query modes
@@ -1518,6 +1526,137 @@ class DemoGroovyExtension implements QuPathExtension {
 			stage.setWidth(scroll.getPrefViewportWidth() + 40)
 			stage.setHeight(scroll.getPrefViewportHeight() + 90)
 			stage.setResizable(true)
+			stage.show()
+		}
+	}
+
+	private static void runExpressionMatrix(QuPathGUI qupath) {
+		Platform.runLater {
+			def imageData = qupath.getImageData()
+			if (imageData == null) {
+				new Alert(AlertType.WARNING, "❌ No image open – please open an image first.")
+						.showAndWait()
+				return
+			}
+			def allSelected = imageData.getHierarchy()
+					.getSelectionModel()
+					.getSelectedObjects()
+					.findAll { it.isCell() }
+			if (allSelected.isEmpty()) {
+				new Alert(AlertType.WARNING, "⚠️ Please select at least one cell!")
+						.showAndWait()
+				return
+			}
+
+			// Prompt for N
+			def dlg = new TextInputDialog("${allSelected.size()}")
+			dlg.setTitle("Expression Matrix Size")
+			dlg.setHeaderText("You have ${allSelected.size()} cells selected")
+			dlg.setContentText("How many cells should the matrix show?")
+			def result = dlg.showAndWait()
+			if (!result.isPresent()) return
+
+			int n
+			try {
+				n = Integer.parseInt(result.get().trim())
+				if (n < 1 || n > allSelected.size()) throw new NumberFormatException()
+			} catch (Exception e) {
+				new Alert(AlertType.ERROR,
+						"Enter a number between 1 and ${allSelected.size()}.")
+						.showAndWait()
+				return
+			}
+			def selected = allSelected.toList().subList(0, n)
+
+			// Find marker‑mean features
+			def names = selected[0].getMeasurementList().getMeasurementNames()
+			def features = names.findAll { it.startsWith("Cell: ") && it.endsWith(" mean") }
+			if (features.isEmpty()) {
+				new Alert(AlertType.INFORMATION, "ℹ️ No marker‑mean measurements found.")
+						.showAndWait()
+				return
+			}
+
+			// Compute global min/max
+			double globalMin = Double.POSITIVE_INFINITY
+			double globalMax = Double.NEGATIVE_INFINITY
+			selected.each { cell ->
+				features.each { f ->
+					double v = cell.getMeasurementList().getMeasurementValue(f) ?: 0.0
+					globalMin = Math.min(globalMin, v)
+					globalMax = Math.max(globalMax, v)
+				}
+			}
+
+			// Build heatmap grid
+			GridPane grid = new GridPane()
+			grid.hgap = 2; grid.vgap = 2; grid.padding = new Insets(10)
+
+			// Header row
+			grid.add(new Label("Marker \\ Cell"), 0, 0)
+			selected.eachWithIndex { cell, j ->
+				grid.add(new Label("Cell ${j+1}"), j+1, 0)
+			}
+
+			// Fill cells with cool‑blue rectangles + tooltip
+			features.eachWithIndex { fname, i ->
+				def shortName = fname.replaceFirst(/^Cell:\s*/, "").replaceFirst(/\s*mean$/, "")
+				grid.add(new Label(shortName), 0, i+1)
+				selected.eachWithIndex { cell, j ->
+					double v = cell.getMeasurementList().getMeasurementValue(fname) ?: 0.0
+					// normalize
+					double ratio = (v - globalMin)/(globalMax - globalMin)
+					ratio = Math.max(0.0, Math.min(1.0, ratio))
+					// white -> deep blue
+					Color from = Color.web("#f7f7f7")
+					Color to   = Color.web("#2166ac")
+					Color fill = from.interpolate(to, ratio)
+
+					Rectangle rect = new Rectangle(20, 20)
+					rect.fill = fill
+					Tooltip.install(rect, new Tooltip(String.format("%.2f", v)))
+					grid.add(rect, j+1, i+1)
+				}
+			}
+
+			// Wrap grid in scroll
+			ScrollPane scroll = new ScrollPane(grid)
+			scroll.fitToWidth  = true
+			scroll.fitToHeight = true
+
+			// Build vertical legend
+			// height roughly = #features * (cellHeight + vgap)
+			double legendHeight = features.size() * 22
+			def stops = [
+					new Stop(0.0, Color.web("#2166ac")), // top = deep blue (max)
+					new Stop(1.0, Color.web("#f7f7f7"))  // bottom = white (min)
+			]
+			LinearGradient lg = new LinearGradient(
+					0, 0, 0, 1, true, CycleMethod.NO_CYCLE, stops
+			)
+			Rectangle legendBar = new Rectangle(20, legendHeight)
+			legendBar.fill = lg
+
+			Label maxLabel = new Label(String.format("%.2f", globalMax))
+			Label minLabel = new Label(String.format("%.2f", globalMin))
+			VBox legendBox = new VBox(5,
+					new Label("Mean Expression"),
+					maxLabel,
+					legendBar,
+					minLabel
+			)
+			legendBox.alignment = Pos.CENTER
+			legendBox.padding = new Insets(10)
+
+			// Combine legend + heatmap
+			HBox root = new HBox(10, legendBox, scroll)
+			root.padding = new Insets(10)
+
+			// Show stage
+			Stage stage = new Stage()
+			stage.setTitle("Expression Heatmap (${n}×${features.size()})")
+			stage.initOwner(qupath.getStage())
+			stage.setScene(new Scene(root))
 			stage.show()
 		}
 	}
