@@ -99,7 +99,8 @@ class DemoGroovyExtension implements QuPathExtension {
 		channelViewerItem.setOnAction { e ->
 			runChannelViewer(qupath)
 		}
-
+		def cellViewerItem = new MenuItem("Cell Viewer")
+		cellViewerItem.setOnAction { e -> runCellViewer(qupath) }
 		def exprMatrixItem = new MenuItem("Expression Matrix")
 		exprMatrixItem.setOnAction { e ->
 			runExpressionMatrix(qupath)
@@ -107,7 +108,7 @@ class DemoGroovyExtension implements QuPathExtension {
 
 
 
-		mainMenu.getItems().addAll(quickSearchMenu, comprehensiveMenu, resetRegionItem,channelViewerItem, exprMatrixItem)
+		mainMenu.getItems().addAll(quickSearchMenu, comprehensiveMenu, resetRegionItem,channelViewerItem,cellViewerItem, exprMatrixItem)
 	}
 
 // Unified Search that intelligently switches between Neighborhood and Multi-Query modes
@@ -727,37 +728,54 @@ class DemoGroovyExtension implements QuPathExtension {
 		stage.setTitle("CSV Cluster Search")
 		stage.initOwner(qupath.getStage()) // No modality!
 
+		// --- UI Elements ---
+		TextField filePathField = new TextField()
+		filePathField.setEditable(false)
 
-		// UI Elements
-		TextField filePathField = new TextField(); filePathField.setEditable(false)
 		ComboBox<String> comboBox = new ComboBox<>()
-		comboBox.getItems().addAll("level_1", "level_2", "level_3", "level_4", "level_5", "level_6")
+		comboBox.getItems().addAll(
+				"level_1", "level_2", "level_3", "level_4", "level_5", "level_6"
+		)
 		comboBox.setValue("level_1")
 
+		// NEW: subfilter text field (comma-separated). Optional.
+		TextField filterField = new TextField()
+		filterField.setPromptText("e.g. 1,3,4  (leave blank to use cell selection)")
+		filterField.setPrefColumnCount(8)
+
 		Slider toleranceSlider = new Slider(1, 50, 20)
-		toleranceSlider.setShowTickLabels(true); toleranceSlider.setShowTickMarks(true)
-		toleranceSlider.setMajorTickUnit(10); toleranceSlider.setMinorTickCount(4)
+		toleranceSlider.setShowTickLabels(true)
+		toleranceSlider.setShowTickMarks(true)
+		toleranceSlider.setMajorTickUnit(10)
+		toleranceSlider.setMinorTickCount(4)
 
 		Button browseButton = new Button("Browse CSV")
 		Button runButton = new Button("Run")
 		runButton.setDisable(true)
 		Button resetButton = new Button("Reset Highlights")
 
-		// Layout
+		// --- Layout ---
 		GridPane grid = new GridPane()
 		grid.setPadding(new Insets(20))
-		grid.setHgap(10); grid.setVgap(10)
+		grid.setHgap(10)
+		grid.setVgap(10)
 
+		// Row 0: CSV file chooser
 		grid.add(new Label("CSV File:"), 0, 0)
 		grid.add(filePathField, 1, 0)
 		grid.add(browseButton, 2, 0)
 
+		// Row 1: Cluster Level dropdown + Filter text field
 		grid.add(new Label("Cluster Level:"), 0, 1)
 		grid.add(comboBox, 1, 1)
+		grid.add(new Label("Filter Value(s):"), 2, 1)
+		grid.add(filterField, 3, 1)
 
+		// Row 2: Tolerance slider
 		grid.add(new Label("Tolerance (px):"), 0, 2)
-		grid.add(toleranceSlider, 1, 2, 2, 1)
+		grid.add(toleranceSlider, 1, 2, 3, 1)
 
+		// Row 3: Run / Reset buttons
 		grid.add(runButton, 1, 3)
 		grid.add(resetButton, 2, 3)
 
@@ -765,16 +783,18 @@ class DemoGroovyExtension implements QuPathExtension {
 		stage.setScene(scene)
 		stage.show()
 
-		// Internal data cache
+		// --- Internal data cache ---
 		def rows = []
 		def header = []
 		File csvFile = null
 
-		// Browse Action
+		// --- Browse Button Action ---
 		browseButton.setOnAction({
 			FileChooser fileChooser = new FileChooser()
 			fileChooser.setTitle("Select CSV File")
-			fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV Files", "*.csv"))
+			fileChooser.getExtensionFilters().add(
+					new FileChooser.ExtensionFilter("CSV Files", "*.csv")
+			)
 			def selected = fileChooser.showOpenDialog(qupath.getStage())
 			if (selected != null) {
 				filePathField.setText(selected.getAbsolutePath())
@@ -788,8 +808,9 @@ class DemoGroovyExtension implements QuPathExtension {
 					lines[1..-1].each { line ->
 						def parts = line.split(",")
 						def row = [:]
-						for (int i = 0; i < header.size(); i++)
+						for (int i = 0; i < header.size(); i++) {
 							row[header[i]] = (i < parts.length ? parts[i] : "")
+						}
 						rows << row
 					}
 				}
@@ -797,10 +818,13 @@ class DemoGroovyExtension implements QuPathExtension {
 			}
 		})
 
+		// --- Reset Button Action ---
 		resetButton.setOnAction({
 			def imageData = qupath.getImageData()
 			if (imageData != null) {
-				def allCells = imageData.getHierarchy().getDetectionObjects().findAll { it.isCell() }
+				def allCells = imageData.getHierarchy()
+						.getDetectionObjects()
+						.findAll { it.isCell() }
 				allCells.each { it.setPathClass(null) }
 				Platform.runLater {
 					def viewer = qupath.getViewer()
@@ -809,13 +833,13 @@ class DemoGroovyExtension implements QuPathExtension {
 					viewer.repaint()
 
 					def alert = new Alert(AlertType.INFORMATION, "✅ Highlights reset.")
-					alert.initOwner(qupath.getStage())  // Tie alert to main window
+					alert.initOwner(qupath.getStage())
 					alert.showAndWait()
 				}
 			}
 		})
 
-		// Run Button Action
+		// --- Run Button Action ---
 		runButton.setOnAction({
 			if (!csvFile || rows.isEmpty()) return
 
@@ -828,54 +852,81 @@ class DemoGroovyExtension implements QuPathExtension {
 			}
 
 			def hierarchy = imageData.getHierarchy()
-			def selected = hierarchy.getSelectionModel().getSelectedObjects().findAll { it.isCell() }
-			if (selected.isEmpty()) {
-				def alert = new Alert(AlertType.WARNING, "⚠️ Please select a cell to run cluster search.")
-				alert.initOwner(qupath.getStage())
-				alert.showAndWait()
-				return
-			}
-
 			def chosenLevel = comboBox.getValue()
 			def tolerance = toleranceSlider.getValue()
 
-			// Collect cluster labels from selected cells
+			// 1) Parse filterField (comma-separated). If non-empty, skip selection logic.
+			String filterText = filterField.getText()?.trim()
 			def selectedLabels = [] as Set
-			selected.each { cell ->
-				def cx = cell.getROI().getCentroidX()
-				def cy = cell.getROI().getCentroidY()
 
-				def nearest = rows.min { row ->
-					if (!row.x || !row.y) return Double.MAX_VALUE
-					def dx = (row.x as double) - cx
-					def dy = (row.y as double) - cy
-					return dx * dx + dy * dy
+			if (filterText) {
+				// Split on commas, trim tokens → a set of cluster IDs
+				filterText.split(",").each { token ->
+					def v = token.trim()
+					if (v) {
+						selectedLabels << v
+					}
 				}
-				if (nearest != null && nearest[chosenLevel] != null)
-					selectedLabels << nearest[chosenLevel]
+				// Because filterText was provided, we do NOT require any cells to be selected.
+			} else {
+				// 2) If filterField is blank, require at least one cell selected
+				def selectedCells = hierarchy.getSelectionModel()
+						.getSelectedObjects()
+						.findAll { it.isCell() }
+				if (selectedCells.isEmpty()) {
+					def alert = new Alert(
+							AlertType.WARNING,
+							"⚠️ Please select at least one cell (or enter filter IDs)."
+					)
+					alert.initOwner(qupath.getStage())
+					alert.showAndWait()
+					return
+				}
+
+				// 3) Original logic: for each selected cell, find nearest row→label
+				selectedCells.each { cell ->
+					def cx = cell.getROI().getCentroidX()
+					def cy = cell.getROI().getCentroidY()
+					def nearest = rows.min { row ->
+						if (!row.x || !row.y) return Double.MAX_VALUE
+						def dx = (row.x as double) - cx
+						def dy = (row.y as double) - cy
+						return dx * dx + dy * dy
+					}
+					if (nearest != null && nearest[chosenLevel] != null) {
+						selectedLabels << nearest[chosenLevel]
+					}
+				}
 			}
 
+			// 4) If after either path, selectedLabels is empty → warn
 			if (selectedLabels.isEmpty()) {
-				def alert = new Alert(AlertType.WARNING, "No matching clusters found in CSV for selected cells.")
+				def alert = new Alert(
+						AlertType.WARNING,
+						"No matching clusters found in CSV (check filter IDs or selected cells)."
+				)
 				alert.initOwner(qupath.getStage())
 				alert.showAndWait()
 				return
 			}
 
-// Find all matching rows with *any* of the selected cluster labels
-			def matchingRows = rows.findAll { row -> selectedLabels.contains(row[chosenLevel]) }
+			// 5) Collect all rows whose `row[chosenLevel]` is in selectedLabels
+			def matchingRows = rows.findAll { row ->
+				selectedLabels.contains(row[chosenLevel])
+			}
 
-			// Spatial bin map
+			// 6) Build spatial‐bin map for fast neighbor lookup
 			def binSize = tolerance
 			def allCells = hierarchy.getDetectionObjects().findAll { it.isCell() }
 			def cellMap = [:].withDefault { [] }
 			allCells.each {
 				def x = it.getROI().getCentroidX()
 				def y = it.getROI().getCentroidY()
-				def key = "${(int)(x/binSize)}_${(int)(y/binSize)}"
+				def key = "${(int)(x / binSize)}_${(int)(y / binSize)}"
 				cellMap[key] << it
 			}
 
+			// 7) For every matching CSV row, find all nearby cells (within `tolerance`)
 			def matchedCells = [] as Set
 			matchingRows.each { row ->
 				if (row.x && row.y) {
@@ -890,18 +941,20 @@ class DemoGroovyExtension implements QuPathExtension {
 							group.each {
 								def dx2 = it.getROI().getCentroidX() - cx
 								def dy2 = it.getROI().getCentroidY() - cy
-								if ((dx2 * dx2 + dy2 * dy2) <= (tolerance * tolerance))
+								if ((dx2 * dx2 + dy2 * dy2) <= (tolerance * tolerance)) {
 									matchedCells << it
+								}
 							}
 						}
 					}
 				}
 			}
-			def labelStr = selectedLabels.join("_").replaceAll("[^a-zA-Z0-9_]", "_")
+
+			// 8) Assign a PathClass based on chosenLevel + joined labels
+			String labelStr = selectedLabels.join("_").replaceAll("[^a-zA-Z0-9_]", "_")
 			def pathClass = PathClass.fromString("Cluster-${chosenLevel}-${labelStr}")
 
 			matchedCells.each { it.setPathClass(pathClass) }
-
 			hierarchy.getSelectionModel().clearSelection()
 			hierarchy.getSelectionModel().setSelectedObjects(matchedCells.toList(), null)
 
@@ -911,15 +964,20 @@ class DemoGroovyExtension implements QuPathExtension {
 				viewer.repaint()
 
 				def labelSummary = selectedLabels.join(", ")
-				def alert = new Alert(AlertType.INFORMATION,
-						"✅ Cluster highlight complete for ${chosenLevel} in [${labelSummary}]\nFound ${matchedCells.size()} cells")
+				def alert = new Alert(
+						AlertType.INFORMATION,
+						"✅ Cluster highlight complete for ${chosenLevel} = [${labelSummary}]\n"
+								+ "Found ${matchedCells.size()} cells."
+				)
 				alert.initOwner(qupath.getStage())
 				alert.showAndWait()
 			}
 
-
-			// Export matched
-			def exportFile = new File(csvFile.getParent(), "matched_cells_${chosenLevel}_${selectedLabels.join('_')}.csv")
+			// 9) Export matched cell centroids to a CSV file
+			def exportFile = new File(
+					csvFile.getParent(),
+					"matched_cells_${chosenLevel}_${selectedLabels.join('_')}.csv"
+			)
 			exportFile.withWriter { w ->
 				w.write("CellX,CellY\n")
 				matchedCells.each {
@@ -952,7 +1010,10 @@ class DemoGroovyExtension implements QuPathExtension {
 		}
 		def measurementNames = allCells[0].getMeasurementList().getMeasurementNames()
 
-		def markerLabels = measurementNames.findAll { it.startsWith("Cell: NeuN") && it.endsWith(" mean") }
+		def markerLabels = measurementNames.findAll { name ->
+			(name =~ /(?i).*NeuN.*/)
+		}
+
 
 		// Decide which phenotype palette to use
 		Map<String, Color> phenotypeColors;
@@ -1246,12 +1307,6 @@ class DemoGroovyExtension implements QuPathExtension {
 		}
 
 	}
-
-
-/**
- * Map a –2…+2 value onto a continuous cool–warm gradient:
- *   deep blue → white → deep red
- */
 	static Color getColorForValue(double v) {
 		// 1) normalize into [0…1]
 		double ratio = (v + 2.0) / 4.0
@@ -1271,8 +1326,6 @@ class DemoGroovyExtension implements QuPathExtension {
 			return neutral.interpolate(deepRed, (ratio - 0.5) * 2.0)
 		}
 	}
-
-
 
 	static void viewMarkerHeatmap(List<Map<String,String>> cachedRows, boolean hasNeuN) {
 		if (!cachedRows) {
@@ -1334,32 +1387,26 @@ class DemoGroovyExtension implements QuPathExtension {
 
 		// 4b) Rows of cells + counts
 		phenotypeCols.eachWithIndex { pheno, r ->
-			// phenotype label
 			Label name = new Label(pheno)
 			name.minWidth = 120
 			grid.add(name, 0, r + 1)
 
-			// heatmap rectangles
 			markerCols.eachWithIndex { m, c ->
 				double raw  = heatmapMatrix[pheno][m] ?: 0.0
-				double norm = normalize(raw)
 				Rectangle rect = new Rectangle(30, 20)
-				rect.fill = getColorForValue(norm)
+				rect.fill = getColorForValue(normalize(raw))
 				Tooltip.install(rect, new Tooltip(
 						"$pheno – $m: ${String.format('%.2f', raw)}"
 				))
 				grid.add(rect, c + 1, r + 1)
 			}
 
-			// count bar
 			int cnt = cellCounts.getOrDefault(pheno, 0)
 			double barW = Math.min(100.0, cnt / 200.0)
 			Rectangle countBar = new Rectangle(barW, 20)
 			countBar.fill = FxColor.GRAY
 			Tooltip.install(countBar, new Tooltip("$pheno: $cnt cells"))
 			grid.add(countBar, markerCols.size() + 1, r + 1)
-
-			// count label
 			grid.add(new Label("$cnt"), markerCols.size() + 2, r + 1)
 		}
 
@@ -1368,53 +1415,56 @@ class DemoGroovyExtension implements QuPathExtension {
 		scroll.fitToWidth  = true
 		scroll.fitToHeight = true
 
-		// 6) Build the continuous gradient legend
-		// 6a) Title
-		Label legendTitle = new Label("Mean expression")
-		legendTitle.style = "-fx-font-weight: bold;"
+		//
+		// 6) Build **vertical** legend
+		//
 
-		// 6b) Gradient bar (blue→white→red)
+		// 6a) Title rotated vertically
+		Label legendTitle = new Label("Mean expression")
+		legendTitle.rotate = -90
+		legendTitle.style  = "-fx-font-weight: bold;"
+
+		// 6b) Gradient bar bottom→top
 		def stops = [
-				new Stop(0.0, getColorForValue(-2)),
-				new Stop(0.5, getColorForValue(0)),
-				new Stop(1.0, getColorForValue(2))
+				new Stop(0.0, getColorForValue(-2)),   // bottom = min (blue)
+				new Stop(0.5, getColorForValue(0)),    // mid   = midpoint
+				new Stop(1.0, getColorForValue(2))     // top    = max (red)
 		]
 		LinearGradient lg = new LinearGradient(
-				0, 0, 1, 0, true, CycleMethod.NO_CYCLE, stops
+				0, 1, 0, 0, true, CycleMethod.NO_CYCLE, stops
 		)
-		Rectangle gradientBar = new Rectangle(200, 20)
+		Rectangle gradientBar = new Rectangle(20, 200)
 		gradientBar.fill = lg
 
-		// 6c) Tick labels
-		Label minLabel = new Label("0")
-		Label midLabel = new Label("0.5")
+		// 6c) Three tick labels: top=1, mid=0.5, bottom=0
 		Label maxLabel = new Label("1")
+		Label midLabel = new Label("0.5")
+		Label minLabel = new Label("0")
 
-		HBox tickBox = new HBox()
+		VBox tickBox = new VBox()
+		tickBox.prefHeightProperty().bind(gradientBar.heightProperty())
 		tickBox.alignment = Pos.CENTER
-		// bind tickBox width to gradientBar width
-		tickBox.prefWidthProperty().bind(gradientBar.widthProperty())
-		tickBox.children.addAll(minLabel, midLabel, maxLabel)
-
-		// let labels spread out
-		[minLabel, midLabel, maxLabel].each { lbl ->
-			HBox.setHgrow(lbl, Priority.ALWAYS)
-			lbl.maxWidth = Double.MAX_VALUE
+		tickBox.children.addAll(maxLabel, midLabel, minLabel)
+		[maxLabel, midLabel, minLabel].each { lbl ->
+			VBox.setVgrow(lbl, Priority.ALWAYS)
+			lbl.alignment = Pos.CENTER
 		}
-		minLabel.alignment = Pos.CENTER_LEFT
-		midLabel.alignment = Pos.CENTER
-		maxLabel.alignment = Pos.CENTER_RIGHT
 
-		// 6d) Assemble legend VBox
-		VBox legend = new VBox(5, legendTitle, gradientBar, tickBox)
-		legend.alignment = Pos.TOP_CENTER
+		// 6d) Put bar + ticks side by side
+		HBox barWithTicks = new HBox(5, gradientBar, tickBox)
+		barWithTicks.alignment = Pos.CENTER_LEFT
 
-		// 7) Layout heatmap + legend side by side
+		// 6e) Combine title + bar+ticks in one HBox
+		HBox legend = new HBox(5, legendTitle, barWithTicks)
+		legend.alignment = Pos.CENTER_LEFT
+		legend.padding = new Insets(10)
+
+		// 7) Layout heatmap + legend
 		HBox root = new HBox(10, scroll, legend)
 		root.padding = new Insets(10)
 		root.alignment = Pos.TOP_LEFT
 
-		// 8) Show the scene
+		// 8) Show everything
 		Stage heatmapStage = new Stage()
 		heatmapStage.title = "Phenotype vs Marker Heatmap"
 		heatmapStage.scene = new Scene(root)
@@ -1500,6 +1550,8 @@ class DemoGroovyExtension implements QuPathExtension {
 
 			// 4) Build stage and Save button
 			Stage stage = new Stage()
+			stage.initOwner(qupath.getStage())
+
 			Button btnSave = new Button("Save Image…")
 			btnSave.setOnAction {
 				def chooser = new FileChooser()
@@ -1522,6 +1574,116 @@ class DemoGroovyExtension implements QuPathExtension {
 			layout.setPadding(new Insets(10))
 
 			stage.setTitle("Channel×Cell Patches Grid")
+			stage.setScene(new Scene(layout))
+			stage.setWidth(scroll.getPrefViewportWidth() + 40)
+			stage.setHeight(scroll.getPrefViewportHeight() + 90)
+			stage.setResizable(true)
+			stage.show()
+		}
+	}
+	private static void runCellViewer(QuPathGUI qupath) {
+		Platform.runLater {
+			// 1) Validate viewer & selection
+			def viewer    = qupath.getViewer()
+			def imageData = qupath.getImageData()
+			if (viewer == null || imageData == null) {
+				new Alert(AlertType.WARNING, "❌ No image open – please open an image first.")
+						.showAndWait()
+				return
+			}
+			def cells = imageData.getHierarchy()
+					.getSelectionModel()
+					.getSelectedObjects()
+					.findAll { it.isCell() }
+			if (cells.isEmpty()) {
+				new Alert(AlertType.WARNING, "⚠️ Please select at least one cell before running Cell Viewer.")
+						.showAndWait()
+				return
+			}
+
+			// 2) Build grid of 75×75 patches around each selected cell
+			def server   = imageData.getServer()
+			def channels = viewer.getImageDisplay().availableChannels()
+			int nChan = channels.size(), nCell = cells.size()
+			int w = 75, h = 75, halfW = w.intdiv(2), halfH = h.intdiv(2)  // ◀◀◀ modified
+
+			def grid = new GridPane()
+			grid.hgap = 5; grid.vgap = 5; grid.padding = new Insets(10)
+			grid.add(new Text('Channel \\ Cell'), 0, 0)
+			cells.eachWithIndex { cell, j -> grid.add(new Text("Cell ${j+1}"), j+1, 0) }
+			channels.eachWithIndex { info, i -> grid.add(new Text(info.name), 0, i+1) }
+
+			cells.eachWithIndex { cell, j ->
+				def roi = cell.getROI()
+				int cx = roi.getCentroidX() as int
+				int cy = roi.getCentroidY() as int
+				int x0 = Math.max(0, cx - halfW)
+				int y0 = Math.max(0, cy - halfH)
+
+				def req = RegionRequest.createInstance(server.getPath(), 1.0, x0, y0, w, h)
+				BufferedImage multi = server.readBufferedImage(req)
+
+				channels.eachWithIndex { info, i ->
+					float[] vals = new float[w*h]
+					info.getValues(multi, 0, 0, w, h, vals)
+					float min = Float.MAX_VALUE, max = -Float.MAX_VALUE
+					vals.each { v -> if (v<min) min=v; if (v>max) max=v }
+
+					int argb = info.getColor()
+					int r = (argb>>16)&0xFF, g = (argb>>8)&0xFF, b = argb&0xFF, a = (argb>>24)&0xFF
+					Color fxColor = Color.rgb(r, g, b, a/255.0)
+
+					BufferedImage patch = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB)
+					for (int xi=0; xi<w; xi++) {
+						for (int yi=0; yi<h; yi++) {
+							int idx = yi*w + xi
+							float norm = (max>min) ? (vals[idx]-min)/(max-min) : 0f
+							norm = Math.max(0f, Math.min(1f, norm))
+							int rr = ((int)(norm*fxColor.red*255)) & 0xFF
+							int gg = ((int)(norm*fxColor.green*255)) & 0xFF
+							int bb = ((int)(norm*fxColor.blue*255)) & 0xFF
+							patch.setRGB(xi, yi, (0xFF<<24)|(rr<<16)|(gg<<8)|bb)
+						}
+					}
+
+					def iv = new ImageView(SwingFXUtils.toFXImage(patch, null))
+					iv.setFitWidth(w); iv.setFitHeight(h); iv.setPreserveRatio(false)
+					grid.add(iv, j+1, i+1)
+				}
+			}
+
+			// 3) Wrap grid in ScrollPane
+			def scroll = new ScrollPane(grid)
+			scroll.setFitToWidth(true); scroll.setFitToHeight(true)
+			scroll.setPrefViewportWidth(Math.min((nCell+1)*w + 20, 1200))
+			scroll.setPrefViewportHeight(Math.min((nChan+1)*h + 20, 800))
+
+			// 4) Build stage and Save button
+			Stage stage = new Stage()
+			stage.initOwner(qupath.getStage())
+
+			Button btnSave = new Button("Save Image…")
+			btnSave.setOnAction {
+				def chooser = new FileChooser()
+				chooser.setTitle("Save Cell Grid")
+				chooser.getExtensionFilters().addAll(
+						new FileChooser.ExtensionFilter("PNG (*.png)", "*.png"),
+						new FileChooser.ExtensionFilter("JPEG (*.jpg)", "*.jpg")
+				)
+				File file = chooser.showSaveDialog(stage)
+				if (file != null) {
+					WritableImage fxImage = grid.snapshot(new SnapshotParameters(), null)
+					BufferedImage bimg     = SwingFXUtils.fromFXImage(fxImage, null)
+					String fmt = file.name.toLowerCase().endsWith(".jpg") ? "jpg" : "png"
+					ImageIO.write(bimg, fmt, file)
+				}
+			}
+
+			// 5) Final layout
+			def layout = new VBox(10, btnSave, scroll)
+			layout.setPadding(new Insets(10))
+
+			stage.setTitle("Cell×Channel 75×75 Grid")  // ◀◀◀ modified
 			stage.setScene(new Scene(layout))
 			stage.setWidth(scroll.getPrefViewportWidth() + 40)
 			stage.setHeight(scroll.getPrefViewportHeight() + 90)
