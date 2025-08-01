@@ -8,6 +8,8 @@ import javafx.geometry.Pos
 import javafx.scene.control.Alert.AlertType
 import javafx.scene.SnapshotParameters
 import javafx.scene.image.WritableImage
+import javafx.geometry.HPos
+import javafx.geometry.VPos
 import javafx.scene.text.Font
 // JavaFX & AWT/Swing imports for Channel Viewer
 import javafx.application.Platform
@@ -61,6 +63,7 @@ import javafx.scene.paint.Color as FxColor
 class DemoGroovyExtension implements QuPathExtension {
 	private static List<Map<String, String>> cachedCSVRows = null
 	private static String cachedCSVPath = null
+	private static boolean hasNeuN = false
 
 	String name = "Cell Search Engine"
 	String description = "Offers quick and comprehensive cell similarity searches."
@@ -83,7 +86,7 @@ class DemoGroovyExtension implements QuPathExtension {
 		def comprehensiveMenu = new Menu("Comprehensive Search")
 
 
-		def csvClusterItem = new MenuItem("Community Search")
+		def csvClusterItem = new MenuItem("Brain Hierarchy Level Analysis")
 		csvClusterItem.setOnAction(e -> runCSVClusterSearch(qupath))
 		comprehensiveMenu.getItems().add(csvClusterItem)
 
@@ -105,10 +108,12 @@ class DemoGroovyExtension implements QuPathExtension {
 		exprMatrixItem.setOnAction { e ->
 			runExpressionMatrix(qupath)
 		}
+		def queryReportItem = new MenuItem("Query Report")
+		queryReportItem.setOnAction { e -> runQueryReport(qupath) }
 
 
 
-		mainMenu.getItems().addAll(quickSearchMenu, comprehensiveMenu, resetRegionItem,channelViewerItem,cellViewerItem, exprMatrixItem)
+		mainMenu.getItems().addAll(quickSearchMenu, comprehensiveMenu, resetRegionItem,channelViewerItem,cellViewerItem, exprMatrixItem,queryReportItem)
 	}
 
 // Unified Search that intelligently switches between Neighborhood and Multi-Query modes
@@ -128,70 +133,73 @@ class DemoGroovyExtension implements QuPathExtension {
 		return hb
 	}
 // Full logic for Neighborhood Search
-    private static void runNeighborhoodSearch(QuPathGUI qupath, PathObject targetCell, List<CheckBox> markerCheckboxes, List<CheckBox> morphCbs, List<CheckBox> surroundCheckboxes, TextField tfRadius, TextField tfTopN, CheckBox cbLocalDensity, ProgressBar progressBar, Label progressLabel) {
-        def imageData = qupath.getImageData()
-        def hierarchy = imageData.getHierarchy()
-        def allCells = hierarchy.getDetectionObjects().findAll { it.isCell() }
-        def pixelSize = imageData.getServer().getPixelCalibration().getPixelWidthMicrons()
-        double radiusMicrons = tfRadius.getText().toDouble()
-        double radiusPixels = radiusMicrons / pixelSize
+	private static void runNeighborhoodSearch(QuPathGUI qupath, PathObject targetCell, List<CheckBox> markerCheckboxes, List<CheckBox> morphCbs, List<CheckBox> surroundCheckboxes, TextField tfRadius, TextField tfTopN, CheckBox cbLocalDensity, ProgressBar progressBar, Label progressLabel) {
+		def imageData = qupath.getImageData()
+		def hierarchy = imageData.getHierarchy()
+		def allCells = hierarchy.getDetectionObjects().findAll { it.isCell() }
+		def pixelSize = imageData.getServer().getPixelCalibration().getPixelWidthMicrons()
+		double radiusMicrons = tfRadius.getText().toDouble()
+		double radiusPixels = radiusMicrons / pixelSize
 
-        if (!cbLocalDensity.isSelected()) {
+		if (!cbLocalDensity.isSelected()) {
 
 			runNeighborhoodSearchAfterDensity(qupath, targetCell, markerCheckboxes, morphCbs, surroundCheckboxes, tfRadius, tfTopN)
 			return
-        }
+		}
 
-        Task<Void> task = new Task<Void>() {
-            @Override
-            protected Void call() throws Exception {
-                updateMessage("Computing local density...")
-                int total = allCells.size()
-                def spatialIndex = [:].withDefault { [] }
-                allCells.each { cell ->
-                    def r = cell.getROI()
-                    def gx = (int)(r.getCentroidX() / radiusPixels)
-                    def gy = (int)(r.getCentroidY() / radiusPixels)
-                    spatialIndex["${gx}_${gy}"] << cell
-                }
-                allCells.eachWithIndex { cell, i ->
-                    def r = cell.getROI()
-                    def cx = r.getCentroidX()
-                    def cy = r.getCentroidY()
-                    def gx = (int)(cx / radiusPixels)
-                    def gy = (int)(cy / radiusPixels)
-                    def count = 0
-                    for (dx in -1..1) {
-                        for (dy in -1..1) {
-                            def key = "${gx + dx}_${gy + dy}"
-                            spatialIndex[key].each { neighbor ->
-                                def r2 = neighbor.getROI()
-                                def dx2 = r2.getCentroidX() - cx
-                                def dy2 = r2.getCentroidY() - cy
-                                if ((dx2 * dx2 + dy2 * dy2) <= radiusPixels * radiusPixels)
-                                    count++
-                            }
-                        }
-                    }
-                    count -= 1 // Exclude self
-                    cell.getMeasurementList().putMeasurement("Local Density (r=${(int)radiusPixels})", count)
-                    updateProgress(i + 1, total)
-                    updateMessage("Processed ${i + 1} / ${total} cells")
-                }
-                Platform.runLater {
-                    runNeighborhoodSearchAfterDensity(qupath, targetCell, markerCheckboxes, morphCbs, surroundCheckboxes, tfRadius, tfTopN)
-                    progressLabel.textProperty().unbind()
-                    progressLabel.setText("✅ Done")
-                }
-                return null
-            }
-        }
-        progressBar.progressProperty().bind(task.progressProperty())
-        progressLabel.textProperty().bind(task.messageProperty())
-        Thread t = new Thread(task)
-        t.setDaemon(true)
-        t.start()
-    }
+		Task<Void> task = new Task<Void>() {
+			@Override
+			protected Void call() throws Exception {
+				updateMessage("Computing local density...")
+				int total = allCells.size()
+				def spatialIndex = [:].withDefault { [] }
+				allCells.each { cell ->
+					def r = cell.getROI()
+					def gx = (int)(r.getCentroidX() / radiusPixels)
+					def gy = (int)(r.getCentroidY() / radiusPixels)
+					spatialIndex["${gx}_${gy}"] << cell
+				}
+				allCells.eachWithIndex { cell, i ->
+					def r = cell.getROI()
+					def cx = r.getCentroidX()
+					def cy = r.getCentroidY()
+					def gx = (int)(cx / radiusPixels)
+					def gy = (int)(cy / radiusPixels)
+					def count = 0
+					for (dx in -1..1) {
+						for (dy in -1..1) {
+							def key = "${gx + dx}_${gy + dy}"
+							spatialIndex[key].each { neighbor ->
+								def r2 = neighbor.getROI()
+								def dx2 = r2.getCentroidX() - cx
+								def dy2 = r2.getCentroidY() - cy
+								if ((dx2 * dx2 + dy2 * dy2) <= radiusPixels * radiusPixels)
+									count++
+							}
+						}
+					}
+					count -= 1 // Exclude self
+					cell.getMeasurementList().putMeasurement("Local Density (r=${(int)radiusPixels})", count)
+					updateProgress(i + 1, total)
+					updateMessage("Processed ${i + 1} / ${total} cells")
+				}
+				Platform.runLater {
+					runNeighborhoodSearchAfterDensity(qupath, targetCell, markerCheckboxes, morphCbs, surroundCheckboxes, tfRadius, tfTopN)
+					progressLabel.textProperty().unbind()
+					progressLabel.setText("✅ Done")
+					// Hide progress bar after completion
+					progressBar.setVisible(false)
+					progressLabel.setVisible(false)
+				}
+				return null
+			}
+		}
+		progressBar.progressProperty().bind(task.progressProperty())
+		progressLabel.textProperty().bind(task.messageProperty())
+		Thread t = new Thread(task)
+		t.setDaemon(true)
+		t.start()
+	}
 
 	private static void runNeighborhoodSearchAfterDensity(QuPathGUI qupath, PathObject targetCell, List<CheckBox> markerCheckboxes, List<CheckBox> morphCbs, List<CheckBox> surroundCheckboxes, TextField tfRadius, TextField tfTopN) {
 
@@ -267,11 +275,11 @@ class DemoGroovyExtension implements QuPathExtension {
 
 			scored.sort { it[1] }
 			def topCells = scored.take(topN).collect { it[0] }
-            def className = PathClass.fromString("Neighborhood-Run-${System.currentTimeMillis() % 100000}")
-            topCells.each { it.setPathClass(className) }
+			def className = PathClass.fromString("Neighborhood-Run-${System.currentTimeMillis() % 100000}")
+			topCells.each { it.setPathClass(className) }
 
 
-            hierarchy.getSelectionModel().setSelectedObjects([targetCell] + topCells, targetCell)
+			hierarchy.getSelectionModel().setSelectedObjects([targetCell] + topCells, targetCell)
 		} else if (!features.isEmpty()) {
 			def targetVec = features.collect { targetCell.getMeasurementList().getMeasurementValue(it) ?: 0.0 }
 			def scored = allCells.findAll { it != targetCell }.collect { cell ->
@@ -280,22 +288,22 @@ class DemoGroovyExtension implements QuPathExtension {
 			}
 			scored.sort { it[1] }
 			def topCells = scored.take(topN).collect { it[0] }
-            def className = PathClass.fromString("Neighborhood-Run-${System.currentTimeMillis() % 100000}")
-            topCells.each { it.setPathClass(className) }
+			def className = PathClass.fromString("Neighborhood-Run-${System.currentTimeMillis() % 100000}")
+			topCells.each { it.setPathClass(className) }
 
 
-            hierarchy.getSelectionModel().setSelectedObjects([targetCell] + topCells, targetCell)
+			hierarchy.getSelectionModel().setSelectedObjects([targetCell] + topCells, targetCell)
 		} else {
 			def nearby = allCells.findAll {
 				def dx = it.getROI().getCentroidX() - centerX
 				def dy = it.getROI().getCentroidY() - centerY
 				(dx*dx + dy*dy) <= radiusPixels*radiusPixels
 			}
-            def className = PathClass.fromString("Neighborhood-Run-${System.currentTimeMillis() % 100000}")
-            nearby.each { it.setPathClass(className) }
+			def className = PathClass.fromString("Neighborhood-Run-${System.currentTimeMillis() % 100000}")
+			nearby.each { it.setPathClass(className) }
 
 
-            hierarchy.getSelectionModel().setSelectedObjects([targetCell] + nearby, targetCell)
+			hierarchy.getSelectionModel().setSelectedObjects([targetCell] + nearby, targetCell)
 		}
 
 		Platform.runLater {
@@ -412,12 +420,18 @@ class DemoGroovyExtension implements QuPathExtension {
 						hierarchy.getSelectionModel().setSelectedObjects(resultCells, null)
 						progressLabel.textProperty().unbind()
 						progressLabel.setText("✅ Done: ${resultCells.size()} cells")
+						// Hide progress bar after completion
+						progressBar.setVisible(false)
+						progressLabel.setVisible(false)
 					}
 				} catch (Exception ex) {
 					ex.printStackTrace()
 					Platform.runLater {
 						progressLabel.textProperty().unbind()
 						progressLabel.setText("❌ Failed: ${ex.message}")
+						// Hide progress bar on failure
+						progressBar.setVisible(false)
+						progressLabel.setVisible(false)
 					}
 					throw ex
 				}
@@ -461,10 +475,10 @@ class DemoGroovyExtension implements QuPathExtension {
 		def cbSurroundSelectAll = new CheckBox("Select All Neighborhood Markers")
 		cbSurroundSelectAll.setOnAction { surroundCheckboxes.each { it.setSelected(cbSurroundSelectAll.isSelected()) } }
 
-        def cbLocalDensity = new CheckBox("Use Local Density")
+		def cbLocalDensity = new CheckBox("Use Local Density")
 		cbLocalDensity.setSelected(false)
 
-        def cbUnion = new CheckBox("Union")
+		def cbUnion = new CheckBox("Union")
 		def cbIntersection = new CheckBox("Intersection")
 		def cbSubtract = new CheckBox("Subtract")
 		def cbContrastive = new CheckBox("Contrastive")
@@ -477,7 +491,11 @@ class DemoGroovyExtension implements QuPathExtension {
 		TextField tfRadius = new TextField("50")
 		TextField tfWeight = new TextField("1.0")
 		ProgressBar progressBar = new ProgressBar(0.0)
-		Label progressLabel = new Label("Idle")
+		Label progressLabel = new Label()
+		
+		// Initially hide progress bar and label
+		progressBar.setVisible(false)
+		progressLabel.setVisible(false)
 
 		Button btnRun = new Button("Run")
 		Button btnExport = new Button("Export CSV")
@@ -492,10 +510,10 @@ class DemoGroovyExtension implements QuPathExtension {
 					.getSelectedObjects()
 					.findAll { it.isCell() }
 			if (selected.isEmpty()) {
-				     new Alert(AlertType.WARNING,
-						         "Please select at least one cell to view its similarity heatmap.").show()
-				     return
-				}
+				new Alert(AlertType.WARNING,
+						"Please select at least one cell to view its similarity heatmap.").show()
+				return
+			}
 			// Reconstruct your marker labels
 			def featureLabels = markerLabels.collect { label -> "Cell: ${label} mean" }
 			// Pass everything into the helper
@@ -503,8 +521,6 @@ class DemoGroovyExtension implements QuPathExtension {
 			viewSelectionFeatureCorrelation(qupath)
 
 		}
-
-
 
 		Stage dialogStage = new Stage()
 
@@ -515,6 +531,11 @@ class DemoGroovyExtension implements QuPathExtension {
 				new Alert(AlertType.WARNING, "Please select at least one cell!").show()
 				return
 			}
+
+			// Show progress bar and label when starting
+			progressBar.setVisible(true)
+			progressLabel.setVisible(true)
+			progressLabel.setText("Starting...")
 
 			if (selected.size() == 1 && !allOps.any { it.isSelected() }) {
 				// Run standard neighborhood search with full parameter set
@@ -534,6 +555,9 @@ class DemoGroovyExtension implements QuPathExtension {
 				)
 			} else {
 				new Alert(AlertType.WARNING, "Please check if your selection and operation match.").show()
+				// Hide progress bar if operation fails
+				progressBar.setVisible(false)
+				progressLabel.setVisible(false)
 			}
 		}
 
@@ -569,14 +593,36 @@ class DemoGroovyExtension implements QuPathExtension {
 			}
 		}
 
+		// Create scrollable sections for each checkbox group
+		def createScrollableSection = { String title, CheckBox selectAll, List<CheckBox> checkboxes, int maxHeight ->
+			def content = new VBox(5)
+			content.getChildren().addAll(selectAll, partitionCheckboxes(checkboxes, 4))
+			
+			def scrollPane = new ScrollPane(content)
+			scrollPane.setFitToWidth(true)
+			scrollPane.setMaxHeight(maxHeight)
+			scrollPane.setVbarPolicy(ScrollPane.ScrollBarPolicy.AS_NEEDED)
+			scrollPane.setHbarPolicy(ScrollPane.ScrollBarPolicy.NEVER)
+			
+			// Add padding to prevent scroll bar from covering content
+			scrollPane.setPadding(new Insets(5, 15, 5, 5)) // top, right, bottom, left - extra right padding for scroll bar
+			
+			def section = new VBox(5, new Label(title), scrollPane)
+			return section
+		}
+
+		// Create sections with scroll bars
+		def markerSection = createScrollableSection("Marker Selections:", cbMarkerSelectAll, markerCheckboxes, 150)
+		def morphSection = createScrollableSection("Morphological Features:", cbMorphSelectAll, morphCbs, 120)
+		def neighborhoodSection = createScrollableSection("Neighborhood Markers:", cbSurroundSelectAll, surroundCheckboxes, 150)
 
 		VBox layout = new VBox(10,
-				new VBox(5, new Label("Marker Selections:"), cbMarkerSelectAll, partitionCheckboxes(markerCheckboxes, 4)),
-				new VBox(5, new Label("Morphological Features:"), cbMorphSelectAll, partitionCheckboxes(morphCbs, 3)),
-				new VBox(5, new Label("Neighborhood Markers:"), cbSurroundSelectAll, partitionCheckboxes(surroundCheckboxes, 4)),
+				markerSection,
+				morphSection,
+				neighborhoodSection,
 				new HBox(10, new Label("Top N:"), tfTopN, new Label("Radius (µm):"), tfRadius, new Label("Weight k:"), tfWeight),
-                new VBox(5, new Label("Other Features:"), cbLocalDensity),
-                new VBox(5, new Label("Operation:"), cbUnion, cbIntersection, cbSubtract, cbContrastive, cbCompetitive),
+				new VBox(5, new Label("Other Features:"), cbLocalDensity),
+				new VBox(5, new Label("Operation:"), partitionCheckboxes(allOps, 3)),
 				new HBox(10, btnRun, btnExport, btnReset, btnSimMatrix,btnClose),
 				progressBar, progressLabel
 		)
@@ -594,8 +640,8 @@ class DemoGroovyExtension implements QuPathExtension {
  */
 	private static void viewSelectionFeatureCorrelation(QuPathGUI qupath) {
 		// 1) Collect cells
-		def hierarchy = qupath.getImageData().getHierarchy()
-		def selected = hierarchy.getSelectionModel()
+		def selected = qupath.getImageData().getHierarchy()
+				.getSelectionModel()
 				.getSelectedObjects()
 				.findAll { it.isCell() }
 		if (selected.size() < 2) {
@@ -607,7 +653,7 @@ class DemoGroovyExtension implements QuPathExtension {
 		}
 
 		// 2) Find “Cell: … mean” features
-		def names = selected[0].getMeasurementList().getMeasurementNames()
+		def names        = selected[0].getMeasurementList().getMeasurementNames()
 		def featureNames = names.findAll {
 			it.startsWith("Cell: ") && it.endsWith(" mean")
 		}
@@ -629,11 +675,11 @@ class DemoGroovyExtension implements QuPathExtension {
 			double stdI  = Math.sqrt(data[i].collect{ (it-meanI)**2 }.sum()/(k-1))
 			for (int j = 0; j < m; j++) {
 				double meanJ = data[j].sum()/k
-				double cov = (0..<k).sum { t ->
+				double cov   = (0..<k).sum{ t ->
 					(data[i][t]-meanI)*(data[j][t]-meanJ)
 				}/(k-1)
-				double stdJ = Math.sqrt(data[j].collect{ (it-meanJ)**2 }.sum()/(k-1))
-				corr[i][j] = cov / (stdI*stdJ + 1e-12)
+				double stdJ  = Math.sqrt(data[j].collect{ (it-meanJ)**2 }.sum()/(k-1))
+				corr[i][j]   = cov / (stdI*stdJ + 1e-12)
 			}
 		}
 
@@ -642,90 +688,138 @@ class DemoGroovyExtension implements QuPathExtension {
 			fn.replaceFirst(/^Cell:\s*/, "").replaceFirst(/\s*mean$/, "")
 		}
 
-		// 6) Build the heatmap grid
+		// 6) Build the heatmap grid with larger cells & padding
 		GridPane gp = new GridPane()
-		gp.hgap = 1; gp.vgap = 1; gp.padding = new Insets(5)
+		gp.hgap    = 4
+		gp.vgap    = 4
+		gp.padding = new Insets(10)
 
-		// 6a) Headers
+		// 6a) Column headers: fully vertical, wider, bold, slightly bigger font
 		shortLabels.eachWithIndex { lab, c ->
 			Label lbl = new Label(lab)
-			lbl.rotate = -45
-			lbl.minWidth = 30; lbl.prefWidth = 30
+			lbl.rotate     = -90
+			lbl.wrapText   = true
+			lbl.maxWidth   = 60
+			lbl.style      = "-fx-font-weight: bold; -fx-font-size: 11;"
+			GridPane.setHalignment(lbl, HPos.CENTER)
+			GridPane.setValignment(lbl, VPos.CENTER)
 			gp.add(lbl, c+1, 0)
 		}
-		// 6b) Cells
+
+		// 6b) Row labels + larger 30×30 cells
 		shortLabels.eachWithIndex { lab, r ->
-			gp.add(new Label(lab), 0, r+1)
+			Label rowLbl = new Label(lab)
+			rowLbl.minWidth  = 100
+			rowLbl.style     = "-fx-font-weight: bold; -fx-font-size: 12;"
+			gp.add(rowLbl, 0, r+1)
+
 			(0..<m).each { c ->
 				double v = corr[r][c]
-				Rectangle rect = new Rectangle(20,20)
-				rect.fill = getColorForValue(v*2)  // [–1…1]→[–2…2]
+				Rectangle rect = new Rectangle(30, 30)
+				rect.fill = getColorForValue(v * 2)  // maps –1…+1 → –2…+2
 				Tooltip.install(rect, new Tooltip(String.format("%.2f", v)))
 				gp.add(rect, c+1, r+1)
 			}
 		}
 
-		// 7) Scrollable pane
+		// 7) Wrap in a ScrollPane
 		ScrollPane heatmapScroll = new ScrollPane(gp)
 		heatmapScroll.fitToWidth  = true
 		heatmapScroll.fitToHeight = true
 		HBox.setHgrow(heatmapScroll, Priority.ALWAYS)
 
-		// 8) Build the **horizontal** gradient legend (blue→white→red)
-		Label legendTitle = new Label("Mean Expression")
-		legendTitle.style = "-fx-font-weight: bold;"
+		// 8) Vertical legend: taller and narrower ticks
+		Label legendTitle = new Label("Feature Correlation (r)")
+		legendTitle.rotate = -90
+		legendTitle.style  = "-fx-font-weight: bold; -fx-font-size: 12;"
 
 		def stops = [
-				new Stop(0.0, Color.web("#2166ac")),  // –1 → blue
-				new Stop(0.5, Color.web("#f7f7f7")),  //  0 → white
-				new Stop(1.0, Color.web("#b2182b"))   // +1 → red
+				new Stop(0.0, Color.web("#2166ac")),
+				new Stop(0.5, Color.web("#f7f7f7")),
+				new Stop(1.0, Color.web("#b2182b"))
 		]
 		LinearGradient lg = new LinearGradient(
-				0,0, 1,0, true, CycleMethod.NO_CYCLE, stops
+				0, 1, 0, 0, true, CycleMethod.NO_CYCLE, stops
 		)
-		Rectangle gradientBar = new Rectangle(200, 20)
+		Rectangle gradientBar = new Rectangle(20, 180)  // increased height
 		gradientBar.fill = lg
 
-		// Tick labels
-		Label minLabel = new Label("0")
-		Label midLabel = new Label("0.5")
-		Label maxLabel = new Label("1")
+		GridPane tickGrid = new GridPane()
+		tickGrid.prefWidth = 40
+		tickGrid.maxHeight = gradientBar.height
+		def topRow = new RowConstraints(); topRow.vgrow = Priority.NEVER
+		def midRow = new RowConstraints(); midRow.vgrow = Priority.ALWAYS
+		def botRow = new RowConstraints(); botRow.vgrow = Priority.NEVER
+		tickGrid.rowConstraints.addAll(topRow, midRow, botRow)
 
-		HBox tickBox = new HBox()
-		tickBox.alignment = Pos.CENTER
-		tickBox.prefWidthProperty().bind(gradientBar.widthProperty())
-		tickBox.children.addAll(minLabel, midLabel, maxLabel)
-		[minLabel, midLabel, maxLabel].each { lbl ->
-			HBox.setHgrow(lbl, Priority.ALWAYS)
-			lbl.maxWidth = Double.MAX_VALUE
-		}
-		minLabel.alignment = Pos.CENTER_LEFT
-		midLabel.alignment = Pos.CENTER
-		maxLabel.alignment = Pos.CENTER_RIGHT
+		Label lblMax = new Label("+1"); GridPane.setHalignment(lblMax, HPos.CENTER); GridPane.setRowIndex(lblMax, 0)
+		Label lblMid = new Label("0");  GridPane.setHalignment(lblMid, HPos.CENTER); GridPane.setRowIndex(lblMid, 1)
+		Label lblMin = new Label("-1"); GridPane.setHalignment(lblMin, HPos.CENTER); GridPane.setRowIndex(lblMin, 2)
+		tickGrid.children.addAll(lblMax, lblMid, lblMin)
 
-		// Assemble legend
-		VBox legendBox = new VBox(5, legendTitle, gradientBar, tickBox)
-		legendBox.alignment = Pos.TOP_CENTER
-		legendBox.padding = Insets.EMPTY
+		// collapse spacing entirely
+		HBox legendBox = new HBox(0, legendTitle, gradientBar, tickGrid)
+		legendBox.alignment = Pos.CENTER
+		legendBox.padding   = new Insets(10)
 
-		// 9) Final layout: heatmap + legend side‑by‑side
-		HBox root = new HBox(10, heatmapScroll, legendBox)
+// now shove the bar 6px to the left, overlapping into the label’s space
+		HBox.setMargin(gradientBar, new Insets(0, 0, 0, -6))
+
+// the tickGrid can stay at its normal spot
+// HBox root as before
+		HBox root = new HBox(8, heatmapScroll, legendBox)
 		root.alignment = Pos.CENTER_LEFT
-		root.padding = Insets.EMPTY
+		root.padding   = Insets.EMPTY
 
-		// 10) Show it
+		// 10) Show stage with a minimum size
 		Stage stage = new Stage()
-		stage.title = "Feature Correlation (n=${k} cells, m=${m} features)"
-		stage.scene = new Scene(root)
-		stage.sizeToScene()
+		stage.title     = "Feature Correlation (n=${k} cells, m=${m} features)"
+		stage.scene     = new Scene(root)
+		stage.minWidth  = 800
+		stage.minHeight = 800
 		stage.resizable = true
 		stage.show()
 	}
-
 	// --- CSV-BASED CLUSTER SEARCH ---
 	static void runCSVClusterSearch(QuPathGUI qupath) {
+		// Check if we already have cached CSV data from Phenotype Finder
+		if (cachedCSVRows != null && cachedCSVPath != null) {
+			// Show info about using cached data
+			def alert = new Alert(AlertType.INFORMATION, 
+				"Using cached CSV data from: ${cachedCSVPath}\n\n" +
+				"This data was loaded from Phenotype Finder.\n" +
+				"You can continue with Brain Community Level Analysis or upload a different CSV file.")
+			alert.setTitle("Cached CSV Data Available")
+			alert.initOwner(qupath.getStage())
+			
+			ButtonType useCached = new ButtonType("Use Cached Data")
+			ButtonType uploadNew = new ButtonType("Upload New CSV")
+			ButtonType cancel = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE)
+			
+			alert.getButtonTypes().setAll(useCached, uploadNew, cancel)
+			
+			def result = alert.showAndWait()
+			if (result.isPresent()) {
+				if (result.get() == useCached) {
+					// Use cached data directly - open the main dialog with cached data
+					openBrainHierarchyDialog(qupath, cachedCSVRows, cachedCSVPath)
+					return
+				} else if (result.get() == uploadNew) {
+					// Clear cache and continue to normal flow
+					cachedCSVRows = null
+					cachedCSVPath = null
+					hasNeuN = false
+				} else {
+					// Cancel
+					return
+				}
+			} else {
+				return
+			}
+		}
+		
 		Stage stage = new Stage()
-		stage.setTitle("CSV Cluster Search")
+		stage.setTitle("Brain Community Level Analysis")
 		stage.initOwner(qupath.getStage()) // No modality!
 
 		// --- UI Elements ---
@@ -750,8 +844,11 @@ class DemoGroovyExtension implements QuPathExtension {
 		toleranceSlider.setMinorTickCount(4)
 
 		Button browseButton = new Button("Browse CSV")
+		Tooltip.install(browseButton, new Tooltip("Upload brain_analysis.csv"))
 		Button runButton = new Button("Run")
 		runButton.setDisable(true)
+		Button viewCorticalButton = new Button("View Cortical Layer")
+		viewCorticalButton.setDisable(true)
 		Button resetButton = new Button("Reset Highlights")
 
 		// --- Layout ---
@@ -761,7 +858,7 @@ class DemoGroovyExtension implements QuPathExtension {
 		grid.setVgap(10)
 
 		// Row 0: CSV file chooser
-		grid.add(new Label("CSV File:"), 0, 0)
+		grid.add(new Label("Brain Analysis CSV File:"), 0, 0)
 		grid.add(filePathField, 1, 0)
 		grid.add(browseButton, 2, 0)
 
@@ -777,7 +874,8 @@ class DemoGroovyExtension implements QuPathExtension {
 
 		// Row 3: Run / Reset buttons
 		grid.add(runButton, 1, 3)
-		grid.add(resetButton, 2, 3)
+		grid.add(viewCorticalButton, 2, 3)
+		grid.add(resetButton, 3, 3)
 
 		Scene scene = new Scene(grid)
 		stage.setScene(scene)
@@ -787,6 +885,14 @@ class DemoGroovyExtension implements QuPathExtension {
 		def rows = []
 		def header = []
 		File csvFile = null
+		
+		// If we have cached data, use it
+		if (cachedCSVRows != null && cachedCSVPath != null) {
+			rows = cachedCSVRows
+			csvFile = new File(cachedCSVPath)
+			filePathField.setText(cachedCSVPath)
+			runButton.setDisable(false)
+		}
 
 		// --- Browse Button Action ---
 		browseButton.setOnAction({
@@ -814,8 +920,28 @@ class DemoGroovyExtension implements QuPathExtension {
 						rows << row
 					}
 				}
+				
+				// Cache the CSV data for the entire session
+				cachedCSVRows = rows
+				cachedCSVPath = selected.getAbsolutePath()
+				hasNeuN = header.any { it == "NeuN" }
 				runButton.setDisable(false)
+				viewCorticalButton.setDisable(false)
 			}
+		})
+
+		// --- View Cortical Layer Button Action ---
+		viewCorticalButton.setOnAction({
+			// Check if CSV has cortical_layers column
+			if (rows.isEmpty() || !rows[0].containsKey("cortical_layers")) {
+				def alert = new Alert(AlertType.WARNING, "⚠️ No cortical layer data found in CSV.\nPlease ensure the CSV contains a 'cortical_layers' column.")
+				alert.initOwner(qupath.getStage())
+				alert.showAndWait()
+				return
+			}
+			
+			// Open cortical layer dialog
+			openCorticalLayerDialog(qupath, rows, csvFile)
 		})
 
 		// --- Reset Button Action ---
@@ -989,10 +1115,280 @@ class DemoGroovyExtension implements QuPathExtension {
 		})
 	}
 
+	static void openBrainHierarchyDialog(QuPathGUI qupath, List<Map<String, String>> cachedRows, String cachedPath) {
+		Stage stage = new Stage()
+		stage.setTitle("Brain Community Level Analysis")
+		stage.initOwner(qupath.getStage())
+
+		// --- UI Elements ---
+		TextField filePathField = new TextField()
+		filePathField.setEditable(false)
+		filePathField.setText(cachedPath)
+
+		ComboBox<String> comboBox = new ComboBox<>()
+		comboBox.getItems().addAll(
+				"level_1", "level_2", "level_3", "level_4", "level_5", "level_6"
+		)
+		comboBox.setValue("level_1")
+
+		TextField filterField = new TextField()
+		filterField.setPromptText("e.g. 1,3,4  (leave blank to use cell selection)")
+		filterField.setPrefColumnCount(8)
+
+		Slider toleranceSlider = new Slider(1, 50, 20)
+		toleranceSlider.setShowTickLabels(true)
+		toleranceSlider.setShowTickMarks(true)
+		toleranceSlider.setMajorTickUnit(10)
+		toleranceSlider.setMinorTickCount(4)
+
+		Button browseButton = new Button("Browse CSV")
+		Tooltip.install(browseButton, new Tooltip("Upload brain_analysis.csv"))
+		Button runButton = new Button("Run")
+		runButton.setDisable(false) // Enable since we have cached data
+		Button viewCorticalButton = new Button("View Cortical Layer")
+		viewCorticalButton.setDisable(false) // Enable since we have cached data
+		Button resetButton = new Button("Reset Highlights")
+
+		// --- Layout ---
+		GridPane grid = new GridPane()
+		grid.setPadding(new Insets(20))
+		grid.setHgap(10)
+		grid.setVgap(10)
+
+		grid.add(new Label("Brain Analysis CSV File:"), 0, 0)
+		grid.add(filePathField, 1, 0)
+		grid.add(browseButton, 2, 0)
+
+		grid.add(new Label("Cluster Level:"), 0, 1)
+		grid.add(comboBox, 1, 1)
+		grid.add(new Label("Filter Value(s):"), 2, 1)
+		grid.add(filterField, 3, 1)
+
+		grid.add(new Label("Tolerance (px):"), 0, 2)
+		grid.add(toleranceSlider, 1, 2, 3, 1)
+
+		grid.add(runButton, 1, 3)
+		grid.add(viewCorticalButton, 2, 3)
+		grid.add(resetButton, 3, 3)
+
+		Scene scene = new Scene(grid)
+		stage.setScene(scene)
+		stage.show()
+
+		// --- Internal data cache ---
+		def rows = cachedRows
+		def header = []
+		File csvFile = new File(cachedPath)
+
+		// --- Browse Button Action ---
+		browseButton.setOnAction({
+			FileChooser fileChooser = new FileChooser()
+			fileChooser.setTitle("Select CSV File")
+			fileChooser.getExtensionFilters().add(
+					new FileChooser.ExtensionFilter("CSV Files", "*.csv")
+			)
+			def selected = fileChooser.showOpenDialog(qupath.getStage())
+			if (selected != null) {
+				filePathField.setText(selected.getAbsolutePath())
+				csvFile = selected
+				rows.clear()
+				header.clear()
+				csvFile.withReader { reader ->
+					def lines = reader.readLines()
+					if (!lines) return
+					header.addAll(lines[0].split(","))
+					lines[1..-1].each { line ->
+						def parts = line.split(",")
+						def row = [:]
+						for (int i = 0; i < header.size(); i++) {
+							row[header[i]] = (i < parts.length ? parts[i] : "")
+						}
+						rows << row
+					}
+				}
+				
+				// Update cache with new data
+				cachedCSVRows = rows
+				cachedCSVPath = selected.getAbsolutePath()
+				hasNeuN = header.any { it == "NeuN" }
+			}
+		})
+
+		// --- View Cortical Layer Button Action ---
+		viewCorticalButton.setOnAction({
+			// Check if CSV has cortical_layers column
+			if (rows.isEmpty() || !rows[0].containsKey("cortical_layers")) {
+				def alert = new Alert(AlertType.WARNING, "⚠️ No cortical layer data found in CSV.\nPlease ensure the CSV contains a 'cortical_layers' column.")
+				alert.initOwner(qupath.getStage())
+				alert.showAndWait()
+				return
+			}
+			
+			// Open cortical layer dialog
+			openCorticalLayerDialog(qupath, rows, csvFile)
+		})
+
+		// --- Reset Button Action ---
+		resetButton.setOnAction({
+			def imageData = qupath.getImageData()
+			if (imageData != null) {
+				def allCells = imageData.getHierarchy()
+						.getDetectionObjects()
+						.findAll { it.isCell() }
+				allCells.each { it.setPathClass(null) }
+				Platform.runLater {
+					def viewer = qupath.getViewer()
+					def hierarchy = qupath.getImageData().getHierarchy()
+					hierarchy.fireHierarchyChangedEvent(null)
+					viewer.repaint()
+
+					def alert = new Alert(AlertType.INFORMATION, "✅ Highlights reset.")
+					alert.initOwner(qupath.getStage())
+					alert.showAndWait()
+				}
+			}
+		})
+
+		// --- Run Button Action ---
+		runButton.setOnAction({
+			if (!csvFile || rows.isEmpty()) return
+
+			def imageData = qupath.getImageData()
+			if (imageData == null) {
+				def alert = new Alert(AlertType.WARNING, "⚠️ No image data found.")
+				alert.initOwner(qupath.getStage())
+				alert.showAndWait()
+				return
+			}
+
+			def hierarchy = imageData.getHierarchy()
+			def chosenLevel = comboBox.getValue()
+			def tolerance = toleranceSlider.getValue()
+
+			String filterText = filterField.getText()?.trim()
+			def selectedLabels = [] as Set
+
+			if (filterText) {
+				filterText.split(",").each { token ->
+					def v = token.trim()
+					if (v) {
+						selectedLabels << v
+					}
+				}
+			} else {
+				def selectedCells = hierarchy.getSelectionModel()
+						.getSelectedObjects()
+						.findAll { it.isCell() }
+				if (selectedCells.isEmpty()) {
+					def alert = new Alert(
+							AlertType.WARNING,
+							"⚠️ Please select at least one cell (or enter filter IDs)."
+					)
+					alert.initOwner(qupath.getStage())
+					alert.showAndWait()
+					return
+				}
+
+				selectedCells.each { cell ->
+					def cx = cell.getROI().getCentroidX()
+					def cy = cell.getROI().getCentroidY()
+					def nearest = rows.min { row ->
+						if (!row.x || !row.y) return Double.MAX_VALUE
+						def dx = (row.x as double) - cx
+						def dy = (row.y as double) - cy
+						return dx * dx + dy * dy
+					}
+					if (nearest != null && nearest[chosenLevel] != null) {
+						selectedLabels << nearest[chosenLevel]
+					}
+				}
+			}
+
+			if (selectedLabels.isEmpty()) {
+				def alert = new Alert(
+						AlertType.WARNING,
+						"No matching clusters found in CSV (check filter IDs or selected cells)."
+				)
+				alert.initOwner(qupath.getStage())
+				alert.showAndWait()
+				return
+			}
+
+			def matchingRows = rows.findAll { row ->
+				selectedLabels.contains(row[chosenLevel])
+			}
+
+			def binSize = tolerance
+			def allCells = hierarchy.getDetectionObjects().findAll { it.isCell() }
+			def cellMap = [:].withDefault { [] }
+			allCells.each {
+				def x = it.getROI().getCentroidX()
+				def y = it.getROI().getCentroidY()
+				def key = "${(int)(x / binSize)}_${(int)(y / binSize)}"
+				cellMap[key] << it
+			}
+
+			def matchedCells = [] as Set
+			matchingRows.each { row ->
+				if (row.x && row.y) {
+					def cx = row.x as double
+					def cy = row.y as double
+					def gx = (int)(cx / binSize)
+					def gy = (int)(cy / binSize)
+					for (dx in -1..1) {
+						for (dy in -1..1) {
+							def key = "${gx + dx}_${gy + dy}"
+							def group = cellMap[key]
+							group.each {
+								def dx2 = it.getROI().getCentroidX() - cx
+								def dy2 = it.getROI().getCentroidY() - cy
+								if ((dx2 * dx2 + dy2 * dy2) <= (tolerance * tolerance)) {
+									matchedCells << it
+								}
+							}
+						}
+					}
+				}
+			}
+
+			String labelStr = selectedLabels.join("_").replaceAll("[^a-zA-Z0-9_]", "_")
+			def pathClass = PathClass.fromString("Cluster-${chosenLevel}-${labelStr}")
+
+			matchedCells.each { it.setPathClass(pathClass) }
+			hierarchy.getSelectionModel().clearSelection()
+			hierarchy.getSelectionModel().setSelectedObjects(matchedCells.toList(), null)
+
+			Platform.runLater {
+				def viewer = qupath.getViewer()
+				hierarchy.fireHierarchyChangedEvent(null)
+				viewer.repaint()
+
+				def labelSummary = selectedLabels.join(", ")
+				def alert = new Alert(
+						AlertType.INFORMATION,
+						"✅ Cluster highlight complete for ${chosenLevel} = [${labelSummary}]\n"
+								+ "Found ${matchedCells.size()} cells."
+				)
+				alert.initOwner(qupath.getStage())
+				alert.showAndWait()
+			}
+
+			def exportFile = new File(
+					csvFile.getParent(),
+					"matched_cells_${chosenLevel}_${selectedLabels.join('_')}.csv"
+			)
+			exportFile.withWriter { w ->
+				w.write("CellX,CellY\n")
+				matchedCells.each {
+					def roi = it.getROI()
+					w.write("${roi.getCentroidX()},${roi.getCentroidY()}\n")
+				}
+			}
+			println "Exported to: ${exportFile.absolutePath}"
+		})
+	}
+
 	static void runPhenotypeFinder(QuPathGUI qupath) {
-		File selectedCSV = null;
-		List<Map<String, String>> cachedRows = null;
-		boolean hasNeuN = false;
 		Closure makeCoordKey = { double x, double y -> "${Math.round(x)}_${Math.round(y)}" };
 		def imageData = qupath.getImageData();
 		if (imageData == null) {
@@ -1013,7 +1409,6 @@ class DemoGroovyExtension implements QuPathExtension {
 		def markerLabels = measurementNames.findAll { name ->
 			(name =~ /(?i).*NeuN.*/)
 		}
-
 
 		// Decide which phenotype palette to use
 		Map<String, Color> phenotypeColors;
@@ -1056,10 +1451,46 @@ class DemoGroovyExtension implements QuPathExtension {
 					"Proliferation"     : new Color(0, 255, 127)
 			];
 		}
+		
+		// Check if we already have cached CSV data
+		if (cachedCSVRows != null && cachedCSVPath != null) {
+			// Show info about using cached data
+			def alert = new Alert(AlertType.INFORMATION, 
+				"Using cached CSV data from: ${cachedCSVPath}\n\n" +
+				"This data was loaded from Brain Community Level Analysis.\n" +
+				"You can continue with Phenotype Finder or upload a different CSV file.")
+			alert.setTitle("Cached CSV Data Available")
+			alert.initOwner(qupath.getStage())
+			
+			ButtonType useCached = new ButtonType("Use Cached Data")
+			ButtonType uploadNew = new ButtonType("Upload New CSV")
+			ButtonType cancel = new ButtonType("Cancel", ButtonBar.ButtonData.CANCEL_CLOSE)
+			
+			alert.getButtonTypes().setAll(useCached, uploadNew, cancel)
+			
+			def result = alert.showAndWait()
+			if (result.isPresent()) {
+				if (result.get() == useCached) {
+					// Use cached data directly
+					showPhenotypeDialog(qupath, imageData, cachedCSVRows, makeCoordKey, phenotypeColors, hasNeuN)
+					return
+				} else if (result.get() == uploadNew) {
+					// Clear cache and continue to upload dialog
+					cachedCSVRows = null
+					cachedCSVPath = null
+					hasNeuN = false
+				} else {
+					// Cancel
+					return
+				}
+			} else {
+				return
+			}
+		}
 
-		// Upload CSV UI
+		// Upload CSV UI (only if no cached data)
 		Stage uploadStage = new Stage();
-		uploadStage.setTitle("Upload Phenotype CSV");
+		uploadStage.setTitle("Upload Brain Analysis CSV to view phenotypes");
 		uploadStage.initModality(Modality.NONE);
 		uploadStage.initOwner(qupath.getStage());
 
@@ -1084,7 +1515,6 @@ class DemoGroovyExtension implements QuPathExtension {
 		browseButton.setOnAction {
 			File file = chooser.showOpenDialog(qupath.getStage());
 			if (file != null) {
-				selectedCSV = file;
 				pathField.setText(file.getAbsolutePath());
 			}
 		}
@@ -1094,6 +1524,7 @@ class DemoGroovyExtension implements QuPathExtension {
 		}
 
 		runUploadButton.setOnAction {
+			File selectedCSV = new File(pathField.getText());
 			if (selectedCSV == null || !selectedCSV.exists()) {
 				def alert = new Alert(Alert.AlertType.WARNING, "Please select a valid CSV file.");
 				alert.initOwner(qupath.getStage());
@@ -1101,8 +1532,8 @@ class DemoGroovyExtension implements QuPathExtension {
 				return;
 			}
 
-			// Read the CSV
-			cachedRows = []
+			// Read the CSV and cache it
+			List<Map<String, String>> cachedRows = []
 			selectedCSV.withReader { reader ->
 				def lines = reader.readLines()
 				def headers = lines[0].split(",").collect { it.trim() }
@@ -1116,6 +1547,10 @@ class DemoGroovyExtension implements QuPathExtension {
 					cachedRows << row
 				}
 			}
+
+			// Cache the data for the entire session
+			cachedCSVRows = cachedRows
+			cachedCSVPath = selectedCSV.getAbsolutePath()
 
 			uploadStage.close()
 			showPhenotypeDialog(qupath, imageData, cachedRows, makeCoordKey, phenotypeColors, hasNeuN)
@@ -1267,12 +1702,12 @@ class DemoGroovyExtension implements QuPathExtension {
 						int gx = (int)(cx/binSize), gy = (int)(cy/binSize)
 						for (dx in -1..1) {
 							for (dy in -1..1) {
-							cellMap["${gx+dx}_${gy+dy}"].each {
-								def dx2 = it.getROI().getCentroidX() - cx
-								def dy2 = it.getROI().getCentroidY() - cy
-								if ((dx2*dx2 + dy2*dy2) <= tol*tol)
-									matched << it
-							}
+								cellMap["${gx+dx}_${gy+dy}"].each {
+									def dx2 = it.getROI().getCentroidX() - cx
+									def dy2 = it.getROI().getCentroidY() - cy
+									if ((dx2*dx2 + dy2*dy2) <= tol*tol)
+										matched << it
+								}
 							}
 						}
 					}
@@ -1285,7 +1720,7 @@ class DemoGroovyExtension implements QuPathExtension {
 			}
 
 /** Build and show the heatmap window. */
-	// 3c) Color & select
+			// 3c) Color & select
 			def color = phenotypeColors.get(phenotype)
 			def pathClass = PathClass.fromString("Pheno: "+phenotype)
 			pathClass.setColor(
@@ -1404,7 +1839,7 @@ class DemoGroovyExtension implements QuPathExtension {
 			int cnt = cellCounts.getOrDefault(pheno, 0)
 			double barW = Math.min(100.0, cnt / 200.0)
 			Rectangle countBar = new Rectangle(barW, 20)
-			countBar.fill = FxColor.GRAY
+			countBar.fill = javafx.scene.paint.Color.GRAY
 			Tooltip.install(countBar, new Tooltip("$pheno: $cnt cells"))
 			grid.add(countBar, markerCols.size() + 1, r + 1)
 			grid.add(new Label("$cnt"), markerCols.size() + 2, r + 1)
@@ -1416,7 +1851,7 @@ class DemoGroovyExtension implements QuPathExtension {
 		scroll.fitToHeight = true
 
 		//
-		// 6) Build **vertical** legend
+		// 6) Build **vertical** legend (smaller + anchored ticks)
 		//
 
 		// 6a) Title rotated vertically
@@ -1424,43 +1859,53 @@ class DemoGroovyExtension implements QuPathExtension {
 		legendTitle.rotate = -90
 		legendTitle.style  = "-fx-font-weight: bold;"
 
-		// 6b) Gradient bar bottom→top
+		// 6b) Smaller gradient bar (height: 100px)
 		def stops = [
-				new Stop(0.0, getColorForValue(-2)),   // bottom = min (blue)
-				new Stop(0.5, getColorForValue(0)),    // mid   = midpoint
-				new Stop(1.0, getColorForValue(2))     // top    = max (red)
-		]
+				   new Stop(0.0, Color.web("#3B4CC0")),  // cool (blue) end
+				     new Stop(0.5, Color.web("#F5F5F5")),  // white midpoint
+				     new Stop(1.0, Color.web("#D73027"))   // warm (red) end
+				 ]
 		LinearGradient lg = new LinearGradient(
 				0, 1, 0, 0, true, CycleMethod.NO_CYCLE, stops
 		)
-		Rectangle gradientBar = new Rectangle(20, 200)
+		Rectangle gradientBar = new Rectangle(20, 150)
 		gradientBar.fill = lg
 
-		// 6c) Three tick labels: top=1, mid=0.5, bottom=0
-		Label maxLabel = new Label("1")
-		Label midLabel = new Label("0.5")
-		Label minLabel = new Label("0")
+		// 6c) Tick‐labels in GridPane for precise anchoring
+		GridPane tickGrid = new GridPane()
+		tickGrid.prefWidth = 30
+		tickGrid.maxHeight = gradientBar.height
 
-		VBox tickBox = new VBox()
-		tickBox.prefHeightProperty().bind(gradientBar.heightProperty())
-		tickBox.alignment = Pos.CENTER
-		tickBox.children.addAll(maxLabel, midLabel, minLabel)
-		[maxLabel, midLabel, minLabel].each { lbl ->
-			VBox.setVgrow(lbl, Priority.ALWAYS)
-			lbl.alignment = Pos.CENTER
-		}
+		def topRow = new RowConstraints(); topRow.vgrow = Priority.NEVER
+		def midRow = new RowConstraints(); midRow.vgrow = Priority.ALWAYS
+		def botRow = new RowConstraints(); botRow.vgrow = Priority.NEVER
+		tickGrid.rowConstraints.addAll(topRow, midRow, botRow)
 
-		// 6d) Put bar + ticks side by side
-		HBox barWithTicks = new HBox(5, gradientBar, tickBox)
+		Label lblMax = new Label("1")
+		GridPane.setHalignment(lblMax, HPos.CENTER)
+		GridPane.setRowIndex(lblMax, 0)
+
+		Label lblMid = new Label("0.5")
+		GridPane.setHalignment(lblMid, HPos.CENTER)
+		GridPane.setRowIndex(lblMid, 1)
+
+		Label lblMin = new Label("0")
+		GridPane.setHalignment(lblMin, HPos.CENTER)
+		GridPane.setRowIndex(lblMin, 2)
+
+		tickGrid.children.addAll(lblMax, lblMid, lblMin)
+
+		// 6d) Combine gradient + ticks
+		HBox barWithTicks = new HBox(5, gradientBar, tickGrid)
 		barWithTicks.alignment = Pos.CENTER_LEFT
 
-		// 6e) Combine title + bar+ticks in one HBox
+		// 6e) Title + barWithTicks (tighter padding)
 		HBox legend = new HBox(5, legendTitle, barWithTicks)
 		legend.alignment = Pos.CENTER_LEFT
-		legend.padding = new Insets(10)
+		legend.padding   = new Insets(5)
 
 		// 7) Layout heatmap + legend
-		HBox root = new HBox(10, scroll, legend)
+		HBox root = new HBox(5, scroll, legend)
 		root.padding = new Insets(10)
 		root.alignment = Pos.TOP_LEFT
 
@@ -1470,6 +1915,7 @@ class DemoGroovyExtension implements QuPathExtension {
 		heatmapStage.scene = new Scene(root)
 		heatmapStage.show()
 	}
+
 
 	private static void runChannelViewer(QuPathGUI qupath) {
 		Platform.runLater {
@@ -1490,20 +1936,45 @@ class DemoGroovyExtension implements QuPathExtension {
 						.showAndWait()
 				return
 			}
+			
+			// 2) Check if more than 6 cells selected and prompt user
+			def cellsList = cells.toList()
+			def cellsToShow = cellsList
+			if (cells.size() > 6) {
+				def dialog = new TextInputDialog("6")
+				dialog.setTitle("Channel Viewer - Cell Selection")
+				dialog.setHeaderText("You have ${cells.size()} cells selected")
+				dialog.setContentText("How many cells would you like to view in the channel grid?")
+				
+				def result = dialog.showAndWait()
+				if (!result.isPresent()) return
+				
+				try {
+					int numCells = Integer.parseInt(result.get().trim())
+					if (numCells < 1 || numCells > cells.size()) {
+						new Alert(AlertType.ERROR, "Please enter a number between 1 and ${cells.size()}.").showAndWait()
+						return
+					}
+					cellsToShow = cellsList.subList(0, numCells)
+				} catch (NumberFormatException e) {
+					new Alert(AlertType.ERROR, "Please enter a valid number.").showAndWait()
+					return
+				}
+			}
 
-			// 2) Build grid of 175×175 patches
+			// 3) Build grid of 175×175 patches
 			def server   = imageData.getServer()
 			def channels = viewer.getImageDisplay().availableChannels()
-			int nChan = channels.size(), nCell = cells.size()
+			int nChan = channels.size(), nCell = cellsToShow.size()
 			int w = 175, h = 175, halfW = w.intdiv(2), halfH = h.intdiv(2)
 
 			def grid = new GridPane()
 			grid.hgap = 5; grid.vgap = 5; grid.padding = new Insets(10)
 			grid.add(new Text('Channel \\ Cell'), 0, 0)
-			cells.eachWithIndex { cell, j -> grid.add(new Text("Cell ${j+1}"), j+1, 0) }
+			cellsToShow.eachWithIndex { cell, j -> grid.add(new Text("Cell ${j+1}"), j+1, 0) }
 			channels.eachWithIndex { info, i -> grid.add(new Text(info.name), 0, i+1) }
 
-			cells.eachWithIndex { cell, j ->
+			cellsToShow.eachWithIndex { cell, j ->
 				def roi = cell.getROI()
 				int cx = roi.getCentroidX() as int
 				int cy = roi.getCentroidY() as int
@@ -1600,20 +2071,45 @@ class DemoGroovyExtension implements QuPathExtension {
 						.showAndWait()
 				return
 			}
+			
+			// 2) Check if more than 6 cells selected and prompt user
+			def cellsList = cells.toList()
+			def cellsToShow = cellsList
+			if (cells.size() > 6) {
+				def dialog = new TextInputDialog("6")
+				dialog.setTitle("Cell Viewer - Cell Selection")
+				dialog.setHeaderText("You have ${cells.size()} cells selected")
+				dialog.setContentText("How many cells would you like to view in the cell grid?")
+				
+				def result = dialog.showAndWait()
+				if (!result.isPresent()) return
+				
+				try {
+					int numCells = Integer.parseInt(result.get().trim())
+					if (numCells < 1 || numCells > cells.size()) {
+						new Alert(AlertType.ERROR, "Please enter a number between 1 and ${cells.size()}.").showAndWait()
+						return
+					}
+					cellsToShow = cellsList.subList(0, numCells)
+				} catch (NumberFormatException e) {
+					new Alert(AlertType.ERROR, "Please enter a valid number.").showAndWait()
+					return
+				}
+			}
 
-			// 2) Build grid of 75×75 patches around each selected cell
+			// 3) Build grid of 75×75 patches around each selected cell
 			def server   = imageData.getServer()
 			def channels = viewer.getImageDisplay().availableChannels()
-			int nChan = channels.size(), nCell = cells.size()
+			int nChan = channels.size(), nCell = cellsToShow.size()
 			int w = 75, h = 75, halfW = w.intdiv(2), halfH = h.intdiv(2)  // ◀◀◀ modified
 
 			def grid = new GridPane()
 			grid.hgap = 5; grid.vgap = 5; grid.padding = new Insets(10)
 			grid.add(new Text('Channel \\ Cell'), 0, 0)
-			cells.eachWithIndex { cell, j -> grid.add(new Text("Cell ${j+1}"), j+1, 0) }
+			cellsToShow.eachWithIndex { cell, j -> grid.add(new Text("Cell ${j+1}"), j+1, 0) }
 			channels.eachWithIndex { info, i -> grid.add(new Text(info.name), 0, i+1) }
 
-			cells.eachWithIndex { cell, j ->
+			cellsToShow.eachWithIndex { cell, j ->
 				def roi = cell.getROI()
 				int cx = roi.getCentroidX() as int
 				int cy = roi.getCentroidY() as int
@@ -1822,6 +2318,257 @@ class DemoGroovyExtension implements QuPathExtension {
 			stage.show()
 		}
 	}
+	/**
+	 * Launches the Query Report workflow: choose between heatmap on highlighted cells or CSV file.
+	 */
+
+	private static void runQueryReport(QuPathGUI qupath) {
+		Stage stage = new Stage()
+		stage.setTitle("Generate Query Report")
+		stage.initOwner(qupath.getStage())
+		stage.initModality(Modality.NONE)
+
+		ToggleGroup tg = new ToggleGroup()
+		RadioButton rbExisting = new RadioButton("Existing highlighted cells").tap { it.setToggleGroup(tg); it.setSelected(true) }
+		RadioButton rbCSV = new RadioButton("Upload CSV...").tap { it.setToggleGroup(tg) }
+
+		// Inline file upload
+		FileChooser chooser = new FileChooser()
+		chooser.setTitle("Select CSV File")
+		chooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("CSV files","*.csv"))
+		File selectedCSV = null
+		TextField pathField = new TextField()
+		pathField.setEditable(false)
+		pathField.visibleProperty().bind(rbCSV.selectedProperty())
+		Button browseButton = new Button("Browse...")
+		browseButton.visibleProperty().bind(rbCSV.selectedProperty())
+		browseButton.setOnAction {
+			File file = chooser.showOpenDialog(qupath.getStage())
+			if (file != null) {
+				selectedCSV = file
+				pathField.setText(file.getAbsolutePath())
+			}
+		}
+
+		Button btnNext = new Button("Next")
+		Button btnCancel = new Button("Cancel")
+		btnNext.setOnAction {
+			stage.close()
+			if (rbExisting.isSelected()) {
+				openQueryConfig(qupath, null)
+			} else if (selectedCSV != null) {
+				List<Map<String,String>> rows = []
+				selectedCSV.withReader { reader ->
+					def lines = reader.readLines()
+					def headers = lines[0].split(',').collect{it.trim()}
+					lines[1..-1].each { line ->
+						def parts = line.split(',')
+						def map = [:]
+						headers.eachWithIndex{ h,i -> map[h]= (i<parts.size()?parts[i].trim():"") }
+						rows << map
+					}
+				}
+				openQueryConfig(qupath, rows)
+			}
+		}
+		btnCancel.setOnAction { stage.close() }
+
+		VBox layout = new VBox(10,
+				rbExisting,
+				rbCSV,
+				new HBox(5, new Label("File:"), pathField, browseButton),
+				new HBox(10, btnNext, btnCancel)
+		)
+		layout.setPadding(new Insets(20))
+		stage.setScene(new Scene(layout))
+		stage.show()
+	}
+
+	private static void openQueryConfig(QuPathGUI qupath, List<Map<String,String>> rows) {
+		def imageData = qupath.getImageData()
+		// Determine cells or CSV rows
+		List<PathObject> cells = rows==null
+				? new ArrayList<>(imageData.getHierarchy()
+				.getSelectionModel()
+				.getSelectedObjects()
+				.findAll{ it.isCell() })
+				: new ArrayList<>()
+
+		if (rows==null && cells.isEmpty()) {
+			new Alert(AlertType.WARNING, "⚠️ Please highlight at least one cell before running Query Report.").showAndWait()
+			return
+		}
+		if (rows!=null && rows.isEmpty()) {
+			new Alert(AlertType.WARNING, "⚠️ The selected CSV file contains no data.").showAndWait()
+			return
+		}
+
+		Stage stage = new Stage()
+		stage.setTitle("Configure Query Report")
+		stage.initOwner(qupath.getStage())
+
+		// --- Build X-axis selectors (markers & neighborhood) ---
+		def allCells = imageData.getHierarchy().getDetectionObjects().findAll{ it.isCell() }
+		def measurementNames = allCells[0].getMeasurementList().getMeasurementNames()
+		def markerLabels = measurementNames.findAll{ it.startsWith("Cell: ") && it.endsWith(" mean") }
+				.collect{ it.replace("Cell: ","").replace(" mean","") }
+		def markerCbs = markerLabels.collect{ new CheckBox(it) }
+		def cbMarkerAll = new CheckBox("Select All Markers")
+		cbMarkerAll.setOnAction{ markerCbs.each{ it.setSelected(cbMarkerAll.isSelected()) } }
+		def surroundCbs = markerLabels.collect{ new CheckBox(it) }
+		def cbSurroundAll = new CheckBox("Select All Neighborhood Markers")
+		cbSurroundAll.setOnAction{ surroundCbs.each{ it.setSelected(cbSurroundAll.isSelected()) } }
+
+		// --- Build Y-axis selectors (cell types & subtypes) ---
+		Map<String,List<String>> subtypeMap = [
+				"Glutamatergic": ["Mature_neuron","Newly_born_neuron","Differentiating_neuron","Cholinergic_neuron","Glutamatergic_neuron","Catecholaminergic_neuron","Apoptotic_neuron"],
+				"GABAergic":    ["Mature_neuron","Newly_born_neuron","Differentiating_neuron","Cholinergic_neuron","Glutamatergic_neuron","Catecholaminergic_neuron","Apoptotic_neuron"],
+				"Cholinergic":  ["Mature_neuron","Newly_born_neuron","Differentiating_neuron","Cholinergic_neuron","Glutamatergic_neuron","Catecholaminergic_neuron","Apoptotic_neuron"],
+				"Catecholaminergic": ["Mature_neuron","Newly_born_neuron","Differentiating_neuron","Cholinergic_neuron","Glutamatergic_neuron","Catecholaminergic_neuron","Apoptotic_neuron"],
+				"Astrocytes":   ["Resting_astrocyte","Reactive_astrocyte","Mature_astrocyte","Immature_astrocyte","Newly_born_astrocyte","Apoptotic_astrocyte"],
+				"Microglia":    ["Proliferating_microglia","Apoptotic_microglia"],
+				"Oligodendrocytes": ["Mature_oligodendrocyte","Myelinating_oligodendrocyte","Non_myelinating_oligodendrocyte","Apoptotic_oligodendrocyte"],
+				"Endothelial cells": ["Mature_endothelial","Reactive_endothelial","Proliferating_endothelial"],
+				"Pericytes":    [],
+				"Ependymal cells": []
+		]
+		Map<String,List<CheckBox>> subCbMap = [:]
+		subtypeMap.each{ type, subs -> subCbMap[type] = [] }
+
+		GridPane grid = new GridPane()
+		grid.setHgap(10); grid.setVgap(10); grid.setPadding(new Insets(20))
+
+		// X-axis UI
+		grid.add(new Label("Center Cell Markers:"), 0, 0)
+		grid.add(new VBox(5, cbMarkerAll, partitionCheckboxes(markerCbs,4)), 1, 0)
+		grid.add(new Label("Neighborhood Markers:"), 0, 1)
+		grid.add(new VBox(5, cbSurroundAll, partitionCheckboxes(surroundCbs,4)), 1, 1)
+
+		// Y-axis UI
+		grid.add(new Label("Cell Types & Subtypes:"), 0, 2)
+		VBox typeBox = new VBox(5)
+		subtypeMap.each{ type, subs ->
+			CheckBox cbType = new CheckBox(type)
+			VBox subBox = new VBox(3)
+			subs.each{ sub ->
+				CheckBox cbSub = new CheckBox(sub)
+				subBox.getChildren().add(cbSub)
+				subCbMap[type].add(cbSub)
+			}
+			subBox.setPadding(new Insets(0,0,0,20))
+			typeBox.getChildren().addAll(cbType, subBox)
+		}
+		ScrollPane yScroll = new ScrollPane(typeBox)
+		yScroll.setFitToWidth(true); yScroll.setMaxHeight(200)
+		grid.add(yScroll, 1, 2)
+
+		// Buttons
+		Button btnPlot = new Button("Plot"), btnCancel = new Button("Cancel")
+		btnCancel.setOnAction{ stage.close() }
+		btnPlot.setOnAction {
+			// Collect selected X features
+			List<String> selX = []
+			markerCbs.findAll{ it.isSelected() }.each{ selX << it.getText() }
+			surroundCbs.findAll{ it.isSelected() }.each{ selX << "Neighbor: ${it.getText()}" }
+			// Collect selected Y groups
+			List<String> selY = []
+			subtypeMap.each{ type, subs ->
+				if (typeBox.getChildren().find{ it instanceof CheckBox && it.getText()==type }.isSelected())
+					selY << type
+				subCbMap[type].findAll{ it.isSelected() }.each{ selY << it.getText() }
+			}
+			// Compute data matrix: mean measurement per group
+			Map<String,Map<String,Double>> dataMatrix = [:]
+			selY.each{ yGroup ->
+				// filter cells by PathClass or skip grouping
+				List<PathObject> groupCells = cells.findAll{
+					it.getPathClass().getName() == yGroup
+				}
+				selX.each{ xFeat ->
+					if (!dataMatrix.containsKey(xFeat)) dataMatrix[xFeat] = [:]
+					double meanVal = 0.0
+					if (!groupCells.isEmpty()) {
+						meanVal = groupCells.collect{ cell ->
+							cell.getMeasurementList().getMeasurementValue("Cell: ${xFeat.replace('Neighbor: ','')} mean") ?: 0.0
+						}.sum() / groupCells.size()
+					}
+					dataMatrix[xFeat][yGroup] = meanVal
+				}
+			}
+			showQueryHeatmap(stage, selX, selY, dataMatrix)
+		}
+		grid.add(new HBox(10, btnPlot, btnCancel), 0, 3, 2, 1)
+
+		stage.setScene(new Scene(grid))
+		stage.show()
+	}
+
+	private static void showQueryHeatmap(Stage owner, List<String> xLabels, List<String> yLabels,
+										 Map<String,Map<String,Double>> dataMatrix) {
+		Stage stage = new Stage()
+		stage.setTitle("Query Heatmap")
+		stage.initOwner(owner)
+
+		GridPane gp = new GridPane()
+		gp.setHgap(4); gp.setVgap(4); gp.setPadding(new Insets(10))
+
+		for (int c = 0; c < xLabels.size(); c++) {
+			Label lbl = new Label(xLabels[c])
+			lbl.setRotate(-90); lbl.setWrapText(true); lbl.setMaxWidth(60)
+			GridPane.setHalignment(lbl, HPos.CENTER); GridPane.setValignment(lbl, VPos.CENTER)
+			gp.add(lbl, c+1, 0)
+		}
+
+		for (int r = 0; r < yLabels.size(); r++) {
+			Label rowLbl = new Label(yLabels[r])
+			rowLbl.setMinWidth(100); rowLbl.setStyle("-fx-font-weight:bold;")
+			gp.add(rowLbl, 0, r+1)
+			for (int c = 0; c < xLabels.size(); c++) {
+				double v = dataMatrix.get(xLabels[c])?.get(yLabels[r]) ?: 0.0
+				javafx.scene.shape.Rectangle rect = new javafx.scene.shape.Rectangle(30,30)
+				rect.setFill(getFXColorForValue(v))
+				Tooltip.install(rect, new Tooltip(String.format("%.2f", v)))
+				gp.add(rect, c+1, r+1)
+			}
+		}
+
+		ScrollPane scroll = new ScrollPane(gp)
+		scroll.setFitToWidth(true); scroll.setFitToHeight(true)
+
+		Label title = new Label("Value")
+		title.setRotate(-90); title.setStyle("-fx-font-weight:bold;")
+		def stops = [new Stop(0.0, javafx.scene.paint.Color.web("#2166ac")),
+					 new Stop(0.5, javafx.scene.paint.Color.web("#f7f7f7")),
+					 new Stop(1.0, javafx.scene.paint.Color.web("#b2182b"))]
+		LinearGradient lg = new LinearGradient(0,1,0,0,true,CycleMethod.NO_CYCLE, stops)
+		javafx.scene.shape.Rectangle gradBar = new javafx.scene.shape.Rectangle(20, yLabels.size()*30)
+		gradBar.setFill(lg)
+
+		Label lblMax = new Label("High")
+		Label lblMid = new Label("Med")
+		Label lblMin = new Label("Low")
+		GridPane tick = new GridPane()
+		tick.setPrefWidth(30)
+		tick.add(lblMax,0,0); tick.add(lblMid,0,1); tick.add(lblMin,0,2)
+
+		HBox legend = new HBox(4, title, gradBar, tick)
+		legend.setAlignment(Pos.CENTER)
+		legend.setPadding(new Insets(10))
+
+		HBox root = new HBox(8, scroll, legend)
+		root.setPadding(new Insets(10))
+
+		stage.setScene(new Scene(root))
+		stage.show()
+	}
+
+	// Utility color mapping for JavaFX heatmap
+	private static javafx.scene.paint.Color getFXColorForValue(double v) {
+		double ratio = Math.max(0.0, Math.min(1.0, v)) // adjust normalization as needed
+		if (ratio < 0.5) return javafx.scene.paint.Color.web("#2166ac").interpolate(javafx.scene.paint.Color.web("#f7f7f7"), ratio*2)
+		else return javafx.scene.paint.Color.web("#f7f7f7").interpolate(javafx.scene.paint.Color.web("#b2182b"), (ratio-0.5)*2)
+	}
+
 
 
 	private static void resetRegionHighlights(QuPathGUI qupath) {
@@ -1867,6 +2614,181 @@ class DemoGroovyExtension implements QuPathExtension {
 					"✅ Reset highlights for ${insideRegion.size()} cells and deleted the selected region.")
 			alert.initOwner(qupath.getStage())
 			alert.show()
+		}
+	}
+
+	static void openCorticalLayerDialog(QuPathGUI qupath, List<Map<String, String>> rows, File csvFile) {
+		Stage stage = new Stage()
+		stage.setTitle("Cortical Layer Visualization")
+		stage.initOwner(qupath.getStage())
+		stage.initModality(Modality.NONE)
+
+		// --- UI Elements ---
+		ComboBox<String> layerCombo = new ComboBox<>()
+		layerCombo.getItems().addAll(
+				"Layer 1", "Layer 2", "Layer 3", "Layer 4", "Layer 5", "Layer 6a", "Layer 6b"
+		)
+		layerCombo.setValue("Layer 1")
+
+		Slider toleranceSlider = new Slider(1, 50, 20)
+		toleranceSlider.setShowTickLabels(true)
+		toleranceSlider.setShowTickMarks(true)
+		toleranceSlider.setMajorTickUnit(10)
+		toleranceSlider.setMinorTickCount(4)
+
+		Button runButton = new Button("Run")
+		Button resetButton = new Button("Reset")
+		Button closeButton = new Button("Close")
+
+		// --- Layout ---
+		GridPane grid = new GridPane()
+		grid.setPadding(new Insets(20))
+		grid.setHgap(10)
+		grid.setVgap(10)
+
+		grid.add(new Label("Cortical Layer:"), 0, 0)
+		grid.add(layerCombo, 1, 0)
+		grid.add(new Label("Tolerance (px):"), 0, 1)
+		grid.add(toleranceSlider, 1, 1)
+		grid.add(runButton, 0, 2)
+		grid.add(resetButton, 1, 2)
+		grid.add(closeButton, 2, 2)
+
+		Scene scene = new Scene(grid)
+		stage.setScene(scene)
+		stage.show()
+
+		// --- Button Actions ---
+		closeButton.setOnAction { stage.close() }
+
+		resetButton.setOnAction {
+			def imageData = qupath.getImageData()
+			if (imageData != null) {
+				def allCells = imageData.getHierarchy()
+						.getDetectionObjects()
+						.findAll { it.isCell() }
+				allCells.each { it.setPathClass(null) }
+				Platform.runLater {
+					def viewer = qupath.getViewer()
+					def hierarchy = qupath.getImageData().getHierarchy()
+					hierarchy.fireHierarchyChangedEvent(null)
+					viewer.repaint()
+
+					def alert = new Alert(AlertType.INFORMATION, "✅ Cortical layer highlights reset.")
+					alert.initOwner(qupath.getStage())
+					alert.showAndWait()
+				}
+			}
+		}
+
+		runButton.setOnAction {
+			def imageData = qupath.getImageData()
+			if (imageData == null) {
+				def alert = new Alert(AlertType.WARNING, "⚠️ No image data found.")
+				alert.initOwner(qupath.getStage())
+				alert.showAndWait()
+				return
+			}
+
+			def hierarchy = imageData.getHierarchy()
+			def selectedLayer = layerCombo.getValue()
+			def tolerance = toleranceSlider.getValue()
+
+			// Map layer names to cortical layer values
+			def layerMapping = [
+					"Layer 1": "1",
+					"Layer 2": "2", 
+					"Layer 3": "3",
+					"Layer 4": "4",
+					"Layer 5": "5",
+					"Layer 6a": "6",
+					"Layer 6b": "7"
+			]
+
+			def targetLayerValue = layerMapping[selectedLayer]
+
+			// Filter rows by cortical layer
+			def matchingRows = rows.findAll { row ->
+				row["cortical_layers"] == targetLayerValue
+			}
+
+			if (matchingRows.isEmpty()) {
+				def alert = new Alert(
+						AlertType.WARNING,
+					"No cells found for ${selectedLayer} in the CSV data."
+				)
+				alert.initOwner(qupath.getStage())
+				alert.showAndWait()
+				return
+			}
+
+			// Build spatial index for fast neighbor lookup
+			def binSize = tolerance
+			def allCells = hierarchy.getDetectionObjects().findAll { it.isCell() }
+			def cellMap = [:].withDefault { [] }
+			allCells.each {
+				def x = it.getROI().getCentroidX()
+				def y = it.getROI().getCentroidY()
+				def key = "${(int)(x / binSize)}_${(int)(y / binSize)}"
+				cellMap[key] << it
+			}
+
+			// Find cells within tolerance of matching CSV coordinates
+			def matchedCells = [] as Set
+			matchingRows.each { row ->
+				if (row.x && row.y) {
+					def cx = row.x as double
+					def cy = row.y as double
+					def gx = (int)(cx / binSize)
+					def gy = (int)(cy / binSize)
+					for (dx in -1..1) {
+						for (dy in -1..1) {
+							def key = "${gx + dx}_${gy + dy}"
+							def group = cellMap[key]
+							group.each {
+								def dx2 = it.getROI().getCentroidX() - cx
+								def dy2 = it.getROI().getCentroidY() - cy
+								if ((dx2 * dx2 + dy2 * dy2) <= (tolerance * tolerance)) {
+									matchedCells << it
+								}
+							}
+						}
+					}
+				}
+			}
+
+			// Assign PathClass and highlight cells
+			def pathClass = PathClass.fromString("Cortical-${selectedLayer.replace(" ", "")}")
+			matchedCells.each { it.setPathClass(pathClass) }
+			hierarchy.getSelectionModel().clearSelection()
+			hierarchy.getSelectionModel().setSelectedObjects(matchedCells.toList(), null)
+
+			Platform.runLater {
+				def viewer = qupath.getViewer()
+				hierarchy.fireHierarchyChangedEvent(null)
+				viewer.repaint()
+
+				def alert = new Alert(
+						AlertType.INFORMATION,
+					"✅ ${selectedLayer} highlighted: ${matchedCells.size()} cells found."
+				)
+				alert.initOwner(qupath.getStage())
+				alert.showAndWait()
+			}
+
+			// Export matched cell centroids to CSV
+			def exportFile = new File(
+					csvFile.getParent(),
+					"cortical_layer_${selectedLayer.replace(" ", "_")}_cells.csv"
+			)
+			exportFile.withWriter { w ->
+				w.write("CellX,CellY,CorticalLayer\n")
+				matchedCells.each {
+					def roi = it.getROI()
+					w.write("${roi.getCentroidX()},${roi.getCentroidY()},${selectedLayer}\n")
+				}
+			}
+			println "Exported to: ${exportFile.absolutePath}"
 		}
 	}
 
