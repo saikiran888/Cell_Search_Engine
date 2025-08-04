@@ -54,6 +54,10 @@ dependencies {
     // If you aren't using Groovy, this can be removed
 
     shadow(libs.bundles.groovy)
+    
+    // Add JSON support
+    implementation("com.google.code.gson:gson:2.10.1")
+    shadow("com.google.code.gson:gson:2.10.1")
 
     // For testing
     testImplementation(libs.bundles.qupath)
