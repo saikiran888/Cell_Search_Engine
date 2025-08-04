@@ -1,4 +1,7 @@
 package qupath.ext.template
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
+import java.io.FileReader
 import javafx.scene.paint.Stop
 import javafx.scene.paint.LinearGradient
 import javafx.scene.paint.CycleMethod
@@ -93,6 +96,10 @@ class DemoGroovyExtension implements QuPathExtension {
 		def phenotypeFinderItem = new MenuItem("Phenotype Finder")
 		phenotypeFinderItem.setOnAction(e -> runPhenotypeFinder(qupath))
 		comprehensiveMenu.getItems().add(phenotypeFinderItem)
+
+		def cosineSimilarityItem = new MenuItem("Cell Similarity Search")
+		cosineSimilarityItem.setOnAction(e -> runCosineSimilaritySearch(qupath))
+		comprehensiveMenu.getItems().add(cosineSimilarityItem)
 
 		def resetRegionItem = new MenuItem("Reset Region Highlights")
 		resetRegionItem.setOnAction(e -> resetRegionHighlights(qupath))
@@ -2792,5 +2799,178 @@ class DemoGroovyExtension implements QuPathExtension {
 		}
 	}
 
+	private static void runCosineSimilaritySearch(QuPathGUI qupath) {
+		def imageData = qupath.getImageData()
+		if (imageData == null) {
+			def alert = new Alert(AlertType.WARNING, "⚠️ No image data available.")
+			alert.initOwner(qupath.getStage())
+			alert.show()
+			return
+		}
 
+		Stage stage = new Stage()
+		stage.setTitle("Cell Similarity Search")
+		stage.initOwner(qupath.getStage())
+		stage.initModality(Modality.NONE)
+
+		// Create UI elements
+		TextField filePathField = new TextField()
+		filePathField.setEditable(false)
+		filePathField.setPrefWidth(300)
+
+		TextField topNField = new TextField("10")
+		topNField.setPrefWidth(100)
+		topNField.setPromptText("Enter number of cells")
+
+		Button browseButton = new Button("Browse JSON")
+		Button runButton = new Button("Run")
+		Button resetButton = new Button("Reset")
+		Button closeButton = new Button("Close")
+
+		// Layout
+		GridPane grid = new GridPane()
+		grid.setPadding(new Insets(20))
+		grid.setHgap(10)
+		grid.setVgap(10)
+
+		grid.add(new Label("Similarity JSON File:"), 0, 0)
+		grid.add(filePathField, 1, 0)
+		grid.add(browseButton, 2, 0)
+
+		grid.add(new Label("Top N Cells:"), 0, 1)
+		grid.add(topNField, 1, 1)
+
+		HBox buttonBox = new HBox(10)
+		buttonBox.getChildren().addAll(runButton, resetButton, closeButton)
+		grid.add(buttonBox, 1, 2)
+
+		// File chooser setup
+		FileChooser chooser = new FileChooser()
+		chooser.setTitle("Select JSON File")
+		chooser.getExtensionFilters().add(
+			new FileChooser.ExtensionFilter("JSON files", "*.json")
+		)
+
+		// Button actions
+		browseButton.setOnAction {
+			File file = chooser.showOpenDialog(stage)
+			if (file != null) {
+				filePathField.setText(file.getAbsolutePath())
+			}
+		}
+
+		closeButton.setOnAction { stage.close() }
+
+		resetButton.setOnAction {
+			def hierarchy = imageData.getHierarchy()
+			def allCells = hierarchy.getDetectionObjects().findAll { it.isCell() }
+			allCells.each { it.setPathClass(null) }
+			Platform.runLater {
+				hierarchy.fireHierarchyChangedEvent(null)
+				qupath.getViewer().repaint()
+			}
+		}
+
+		runButton.setOnAction {
+			File jsonFile = new File(filePathField.getText())
+			if (!jsonFile.exists()) {
+				def alert = new Alert(AlertType.WARNING, "Please select a valid JSON file.")
+				alert.initOwner(stage)
+				alert.show()
+				return
+			}
+
+			int topN
+			try {
+				topN = Integer.parseInt(topNField.getText().trim())
+				if (topN <= 0) throw new NumberFormatException()
+			} catch (NumberFormatException e) {
+				def alert = new Alert(AlertType.WARNING, "Please enter a valid positive number for Top N cells.")
+				alert.initOwner(stage)
+				alert.show()
+				return
+			}
+
+			// Parse JSON and process similarities
+			def gson = new Gson()
+			def similarities
+			try {
+				def mapType = new TypeToken<Map<String, List<Double>>>() {}.getType()
+				similarities = gson.fromJson(new FileReader(jsonFile), mapType)
+			} catch (Exception e) {
+				def alert = new Alert(AlertType.ERROR, "Error parsing JSON file: ${e.message}")
+				alert.initOwner(stage)
+				alert.show()
+				return
+			}
+
+			// Get all cells from QuPath
+			def hierarchy = imageData.getHierarchy()
+			def allCells = hierarchy.getDetectionObjects().findAll { it.isCell() }
+
+			// Create a map of cell coordinates to cell objects
+			def cellMap = [:]
+			allCells.each { cell ->
+				def roi = cell.getROI()
+				def key = "${roi.getCentroidX()}_${roi.getCentroidY()}"
+				cellMap[key] = cell
+			}
+
+			// Process each entry in the JSON
+			similarities.each { filename, values ->
+				// Extract x, y coordinates from filename (format: x_ys1_id.tif)
+				def coords = filename.split('_')
+				if (coords.size() >= 2) {
+					def x = coords[0]
+					def y = coords[1].replace('ys1', '')
+					
+					// Find the closest cell to these coordinates
+					def targetKey = "${x}_${y}"
+					def targetCell = cellMap[targetKey]
+					
+					if (targetCell) {
+						// Create list of cells with their similarity scores
+						def cellScores = []
+						allCells.eachWithIndex { cell, idx ->
+							if (idx < values.size()) {
+								cellScores << [cell: cell, score: values[idx]]
+							}
+						}
+						
+						// Sort by similarity score (highest first) and take top N
+						def topCells = cellScores.sort { -it.score }.take(topN)
+						
+						// Highlight cells
+						def className = PathClass.fromString("Similar-${x}_${y}")
+						topCells.each { entry ->
+							entry.cell.setPathClass(className)
+						}
+						
+						// Print scores for verification
+						println "Top ${topN} similar cells for ${x}_${y}:"
+						topCells.eachWithIndex { entry, idx ->
+							def cell = entry.cell
+							def score = entry.score
+							println "${idx + 1}. Cell at (${cell.ROI.centroidX}, ${cell.ROI.centroidY}) - Similarity: ${score}"
+						}
+					}
+				}
+			}
+
+			// Update display
+			Platform.runLater {
+				hierarchy.fireHierarchyChangedEvent(null)
+				qupath.getViewer().repaint()
+				
+				def alert = new Alert(AlertType.INFORMATION, 
+					"✅ Cell similarity search complete.\nHighlighted top ${topN} similar cells for each target.")
+				alert.initOwner(stage)
+				alert.show()
+			}
+		}
+
+		Scene scene = new Scene(grid)
+		stage.setScene(scene)
+		stage.show()
+	}
 }
